@@ -1,0 +1,172 @@
+{
+    "projectId": "wykopindex",
+    "endpoint": "https://fra.cloud.appwrite.io/v1",
+    "projectName": "WykopIndex",
+    "settings": {
+        "services": {
+            "account": true,
+            "avatars": true,
+            "databases": true,
+            "locale": true,
+            "health": true,
+            "storage": true,
+            "teams": true,
+            "users": true,
+            "sites": true,
+            "functions": true,
+            "graphql": true,
+            "messaging": true
+        },
+        "auth": {
+            "methods": {
+                "jwt": true,
+                "phone": true,
+                "invites": true,
+                "anonymous": true,
+                "email-otp": true,
+                "magic-url": true,
+                "email-password": true
+            },
+            "security": {
+                "duration": 31536000,
+                "limit": 0,
+                "sessionsLimit": 10,
+                "passwordHistory": 0,
+                "passwordDictionary": false,
+                "personalDataCheck": false,
+                "sessionAlerts": false,
+                "mockNumbers": []
+            }
+        }
+    },
+    "functions": [
+        {
+            "$id": "696171ec001de97fe3c0",
+            "execute": [],
+            "name": "wykop-index",
+            "enabled": true,
+            "logging": true,
+            "runtime": "node-22",
+            "scopes": [
+                "documents.write"
+            ],
+            "events": [],
+            "schedule": "0 */6 * * *",
+            "timeout": 300,
+            "entrypoint": "src/main.js",
+            "commands": "npm install",
+            "specification": "s-0.5vcpu-512mb",
+            "path": "functions/wykop-index"
+        }
+    ],
+    "tablesDB": [
+        {
+            "$id": "69617178003ac8ef4fba",
+            "name": "wykopindex",
+            "enabled": true
+        }
+    ],
+    "buckets": [
+        {
+            "$id": "6961715000182498a35a",
+            "$permissions": [
+                "read(\"any\")"
+            ],
+            "fileSecurity": false,
+            "name": "wykop-index",
+            "enabled": true,
+            "maximumFileSize": 50000000,
+            "allowedFileExtensions": [],
+            "compression": "none",
+            "encryption": true,
+            "antivirus": true
+        }
+    ],
+    "tables": [
+        {
+            "$id": "sentiment",
+            "$permissions": [
+                "read(\"any\")"
+            ],
+            "databaseId": "69617178003ac8ef4fba",
+            "name": "sentiment",
+            "enabled": true,
+            "rowSecurity": false,
+            "columns": [
+                {
+                    "key": "sentiment",
+                    "type": "integer",
+                    "required": true,
+                    "array": false,
+                    "min": 1,
+                    "max": 100,
+                    "default": null
+                },
+                {
+                    "key": "summary",
+                    "type": "string",
+                    "required": true,
+                    "array": false,
+                    "size": 1000,
+                    "default": null,
+                    "encrypt": false
+                },
+                {
+                    "key": "mostActiveUsers",
+                    "type": "string",
+                    "required": false,
+                    "array": false,
+                    "size": 1000,
+                    "default": null,
+                    "encrypt": false
+                },
+                {
+                    "key": "mostDiscussed",
+                    "type": "string",
+                    "required": false,
+                    "array": false,
+                    "size": 1000,
+                    "default": null,
+                    "encrypt": false
+                },
+                {
+                    "key": "tomekSentiment",
+                    "type": "integer",
+                    "required": true,
+                    "array": false,
+                    "min": 1,
+                    "max": 100,
+                    "default": null
+                },
+                {
+                    "key": "tomekSummary",
+                    "type": "string",
+                    "required": false,
+                    "array": false,
+                    "size": 1000,
+                    "default": null,
+                    "encrypt": false
+                }
+            ],
+            "indexes": []
+        }
+    ],
+    "sites": [
+        {
+            "$id": "69629da60019c23b0451",
+            "name": "WykopIndex",
+            "enabled": true,
+            "logging": true,
+            "framework": "react",
+            "timeout": 30,
+            "installCommand": "npm install",
+            "buildCommand": "npm run build",
+            "outputDirectory": "./dist",
+            "specification": "s-0.5vcpu-512mb",
+            "buildRuntime": "node-22",
+            "adapter": "static",
+            "fallbackFile": "index.html",
+            "path": "sites/WykopIndex"
+        }
+    ]
+}
