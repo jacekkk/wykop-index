@@ -246,7 +246,7 @@ function App() {
 
                   {item.mostDiscussed && (
                     <div>
-                      <h3 className="text-sm font-bold text-[#FF0000] mb-1">Najczęściej wspominane (nie kupować, zaraz spadnie)</h3>
+                      <h3 className="text-sm font-bold text-[#FF0000] mb-1">Najczęściej omawiane (nie kupować, zaraz spadnie)</h3>
                       <div className="space-y-1">
                         {(item.mostDiscussed.startsWith('[') ? JSON.parse(item.mostDiscussed) : item.mostDiscussed.split(',')).map((topic, index) => (
                           <div key={index} className="flex items-center gap-2 text-[#97979B]">

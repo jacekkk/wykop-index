@@ -57,6 +57,25 @@
             "commands": "npm install",
             "specification": "s-0.5vcpu-512mb",
             "path": "functions/wykop-index"
+        },
+        {
+            "$id": "wykop-post",
+            "execute": [],
+            "name": "wykop-post",
+            "enabled": true,
+            "logging": true,
+            "runtime": "node-22",
+            "scopes": [
+                "documents.read",
+                "files.read"
+            ],
+            "events": [],
+            "schedule": "",
+            "timeout": 300,
+            "entrypoint": "src/main.js",
+            "commands": "npm install",
+            "specification": "s-0.5vcpu-512mb",
+            "path": "functions/wykop-post"
         }
     ],
     "tablesDB": [
