@@ -67,12 +67,15 @@ function App() {
           console.error('Error fetching week ago sentiment:', err);
         }
 
-        // Fetch the wykopindex image
-        const imageViewUrl = storage.getFileView(
-          '6961715000182498a35a', // Bucket ID
-          'wykopindex'
-        );
-        setImageUrl(imageViewUrl);
+        // Fetch the composite image from the latest sentiment data
+        if (response.documents.length > 0) {
+          const fileId = response.documents[0].imageId || 'wykopindex'; // Default to 'wykopindex' if imageId is null/empty
+          const imageViewUrl = storage.getFileView(
+            '6961715000182498a35a', // Bucket ID
+            fileId
+          );
+          setImageUrl(imageViewUrl);
+        }
 
         setLoadingSentiment(false);
       } catch (err) {
@@ -246,7 +249,7 @@ function App() {
 
                   {item.mostDiscussed && (
                     <div>
-                      <h3 className="text-sm font-bold text-[#FF0000] mb-1">Najczęściej omawiane (nie kupować, zaraz spadnie)</h3>
+                      <h3 className="text-sm font-bold text-[#FF0000] mb-1">Najczęściej omawiane</h3>
                       <div className="space-y-1">
                         {(item.mostDiscussed.startsWith('[') ? JSON.parse(item.mostDiscussed) : item.mostDiscussed.split(',')).map((topic, index) => (
                           <div key={index} className="flex items-center gap-2 text-[#97979B]">

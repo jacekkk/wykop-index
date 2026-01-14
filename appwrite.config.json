@@ -48,10 +48,12 @@
             "logging": true,
             "runtime": "node-22",
             "scopes": [
-                "documents.write"
+                "documents.write",
+                "files.read",
+                "files.write"
             ],
             "events": [],
-            "schedule": "0 */6 * * *",
+            "schedule": "0 9,13,17,21 * * *",
             "timeout": 300,
             "entrypoint": "src/main.js",
             "commands": "npm install",
@@ -66,11 +68,10 @@
             "logging": true,
             "runtime": "node-22",
             "scopes": [
-                "documents.read",
-                "files.read"
+                "documents.read"
             ],
             "events": [],
-            "schedule": "",
+            "schedule": "30 9,17 * * *",
             "timeout": 300,
             "entrypoint": "src/main.js",
             "commands": "npm install",
@@ -163,6 +164,15 @@
                     "required": false,
                     "array": false,
                     "size": 1000,
+                    "default": null,
+                    "encrypt": false
+                },
+                {
+                    "key": "imageId",
+                    "type": "string",
+                    "required": false,
+                    "array": false,
+                    "size": 255,
                     "default": null,
                     "encrypt": false
                 }

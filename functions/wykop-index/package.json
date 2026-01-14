@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.35.0",
+    "@napi-rs/canvas": "^0.1.88",
     "node-appwrite": "^14.1.0"
   },
   "devDependencies": {

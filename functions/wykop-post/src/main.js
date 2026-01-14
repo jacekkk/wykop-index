@@ -50,10 +50,15 @@ export default async ({ req, res, log, error }) => {
     const mostActiveUsers = JSON.parse(latestSentiment.mostActiveUsers);
     const mostDiscussed = JSON.parse(latestSentiment.mostDiscussed);
 
+    // Construct image URL from stored file ID
+    const imageUrl = `${process.env.BUCKET_URL}/files/${latestSentiment.imageId}/view?project=wykopindex`;
+    
+    log(`Using image URL: ${imageUrl}`);
+
     // Format the post content
     const postContent = `[Krach & Śmieciuch Index](https://wykop-index.appwrite.network/) - stan na ${new Date(latestSentiment.$createdAt).toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw' })}
 
-Sentyment: **${latestSentiment.sentiment}/100 ${latestSentiment.sentiment <= 20 ? '🚽' : latestSentiment.sentiment <= 40 ? '💩' : latestSentiment.sentiment <= 60 ? '🆗' : latestSentiment.sentiment <= 80 ? '🚀' : '🔥'}**
+Sentyment: **${latestSentiment.sentiment}/100 ${latestSentiment.sentiment <= 20 ? '💩' : latestSentiment.sentiment <= 40 ? '🚽' : latestSentiment.sentiment <= 60 ? '🆗' : latestSentiment.sentiment <= 80 ? '🚀' : '🔥'}**
 
 ${latestSentiment.summary}
 
@@ -79,7 +84,7 @@ ${latestSentiment.tomekSentiment ? `\nTomekIndicator®: ${latestSentiment.tomekS
       },
       body: JSON.stringify({
         data: {
-          url: process.env.IMAGE_URL
+          url: imageUrl
         }
       })
     });

@@ -1,5 +1,7 @@
 import * as sdk from 'node-appwrite';
+import { InputFile } from 'node-appwrite/file';
 import { GoogleGenAI } from '@google/genai';
+import { createCanvas, loadImage } from '@napi-rs/canvas';
 
 export default async ({ req, res, log, error }) => {
   try {
@@ -10,6 +12,7 @@ export default async ({ req, res, log, error }) => {
       .setKey(process.env.APPWRITE_API_KEY);
 
     const databases = new sdk.Databases(client);
+    const storage = new sdk.Storage(client);
 
     // Initialize Gemini AI
     const ai = new GoogleGenAI({
@@ -17,6 +20,8 @@ export default async ({ req, res, log, error }) => {
     });
 
     const model = 'gemini-3-flash-preview';
+    const systemInstruction = `You are a helpful assistant that analyzes Polish social media sentiment about stock markets.
+    Always respond with a valid JSON, don't include any additional characters or formatting around JSON response.`;
 
     // Authenticate with Wykop API
     const wykopAuthResponse = await fetch('https://wykop.pl/api/v3/auth', {
@@ -88,20 +93,27 @@ export default async ({ req, res, log, error }) => {
 
     const prompt = `Przenalizuj najnowsze wpisy z tagu #gielda na portalu wykop.pl i oszacuj obecny sentyment uzytkownikow w skali 1-100,
     gdzie 1 to ekstremalnie bearish, a 100 to ekstremalnie bullish. Uzyj cytatow jako uzasadnienia.
-    Odpowiedz w nastepujacym formacie JSON: ${responseFormat}. Nie dodawaj zadnych dodatkowych znakow lub formatowania.
+    Odpowiedz w nastepujacym formacie JSON: ${responseFormat}.
     Wpisy: ${JSON.stringify(parsedData)}`;
 
     const response = await ai.models.generateContent({
       model: model,
       contents: prompt,
       config: {
+        systemInstruction: systemInstruction,
         tools: [{urlContext: {}}],
       },
     });
 
-    log("AI response: " + response.text);
-
-    const sentimentResult = JSON.parse(response.text);
+    let sentimentResult;
+    try {
+      sentimentResult = JSON.parse(response.text);
+      log("Sentiment: " + sentimentResult.sentiment);
+    } catch (parseError) {
+      error("Failed to parse AI response as JSON: " + parseError.message);
+      error("Raw response: " + response.text);
+      throw new Error("AI returned invalid JSON: " + parseError.message);
+    }
     
     // Ensure mostActiveUsers and mostDiscussed are strings
     if (Array.isArray(sentimentResult.mostActiveUsers)) {
@@ -112,7 +124,6 @@ export default async ({ req, res, log, error }) => {
     }
 
     // --- TOMEK INDICATOR SECTION ---
-    log("Starting Tomek Indicator analysis");
 
     // Fetch Tomek's posts
     const [tomekResponse1, tomekResponse2] = await Promise.all([
@@ -167,20 +178,97 @@ export default async ({ req, res, log, error }) => {
 
     const tomekPrompt = `Z lekka szydera, ale tez sympatia przenalizuj najnowsze wpisy uzytkownika tom-ek12333 z tagu #gielda na portalu wykop.pl.
     Oszacuj jego obecny sentyment w skali 1-100, gdzie 1 to ekstremalnie bearish, a 100 to ekstremalnie bullish. Uzyj cytatow jako uzasadnienia.
-    Odpowiedz w nastepujacym formacie JSON: ${tomekResponseFormat}. Nie dodawaj zadnych dodatkowych znakow lub formatowania.
+    Odpowiedz w nastepujacym formacie JSON: ${tomekResponseFormat}.
     Wpisy: ${JSON.stringify(filteredTomekData)}`;
 
     const tomekResponse = await ai.models.generateContent({
       model: model,
       contents: tomekPrompt,
       config: {
+        systemInstruction: systemInstruction,
         tools: [{urlContext: {}}],
       },
     });
 
-    log("Tomek AI response: " + tomekResponse.text);
+    let tomekSentimentResult;
+    try {
+      tomekSentimentResult = JSON.parse(tomekResponse.text);
+      log("Tomek sentiment: " + tomekSentimentResult.sentiment);
+    } catch (parseError) {
+      error("Failed to parse Tomek AI response as JSON: " + parseError.message);
+      error("Raw response: " + tomekResponse.text);
+      throw new Error("Tomek AI returned invalid JSON: " + parseError.message);
+    }
 
-    const tomekSentimentResult = JSON.parse(tomekResponse.text);
+    // --- IMAGE GENERATION SECTION ---
+    let imageId = null;
+    try {
+      log("Generating image");
+      
+      // Download the base image from storage
+      const baseImageBuffer = await storage.getFileDownload(
+        '6961715000182498a35a', // Bucket ID
+        'wykopindex' // File ID
+      );
+
+      // Load the base image
+      const baseImage = await loadImage(Buffer.from(baseImageBuffer));
+      
+      // Create canvas with same dimensions as base image
+      const canvas = createCanvas(baseImage.width, baseImage.height);
+      const ctx = canvas.getContext('2d');
+      
+      // Draw base image
+      ctx.drawImage(baseImage, 0, 0);
+      
+      // Calculate needle parameters (image size: 1433 x 933)
+      const sentiment = parseInt(sentimentResult.sentiment);
+      const centerX = canvas.width / 2 + 5;
+      const centerY = canvas.height * 0.915; // 8.5% from bottom = 91.5% from top (matching frontend)
+      const needleLength = 300; // Fixed length
+      const angle = (-90 + (sentiment * 1.8)) * Math.PI / 180; // Convert to radians
+      
+      // Draw the needle (triangle arrow) from center pivot point
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.rotate(angle);
+      
+      // Draw triangle pointing up (along needle direction from pivot)
+      ctx.beginPath();
+      ctx.moveTo(0, -needleLength); // Tip of arrow
+      ctx.lineTo(-8, 0); // width (left base)
+      ctx.lineTo(8, 0); // width (right base)
+      ctx.closePath();
+      
+      ctx.fillStyle = '#575757';
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+      ctx.shadowBlur = 6;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 2;
+      ctx.fill();
+      
+      ctx.restore();
+      
+      // Convert canvas to buffer
+      const imageBuffer = canvas.toBuffer('image/png');
+      
+      // Upload to storage as a new file with timestamp
+      log("Uploading image to storage");
+      const timestamp = Date.now();
+      const fileName = `wykopindex-${timestamp}`;
+      
+      const uploadedFile = await storage.createFile(
+        '6961715000182498a35a', // Bucket ID
+        fileName, // File ID with timestamp
+        InputFile.fromBuffer(imageBuffer, `${fileName}.png`)
+      );
+
+      imageId = uploadedFile.$id;
+      log(`Image uploaded successfully: ${imageId}`);
+    } catch (imageError) {
+      error("Failed to generate or upload image: " + imageError.message);
+      log("Continuing with null imageId");
+    }
 
     log("Saving to database");
 
@@ -194,11 +282,12 @@ export default async ({ req, res, log, error }) => {
           mostActiveUsers: sentimentResult.mostActiveUsers,
           mostDiscussed: sentimentResult.mostDiscussed,
           tomekSentiment: parseInt(tomekSentimentResult.sentiment),
-          tomekSummary: tomekSentimentResult.summary
+          tomekSummary: tomekSentimentResult.summary,
+          imageId: imageId
         }
     );
 
-    log("Database result: " + dbResult.$id);
+    log("Database entry added: " + dbResult.$id);
 
     return res.empty();
   } catch(err) {
