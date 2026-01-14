@@ -50,11 +50,6 @@ export default async ({ req, res, log, error }) => {
     const mostActiveUsers = JSON.parse(latestSentiment.mostActiveUsers);
     const mostDiscussed = JSON.parse(latestSentiment.mostDiscussed);
 
-    // Construct image URL from stored file ID
-    const imageUrl = `${process.env.BUCKET_URL}/files/${latestSentiment.imageId}/view?project=wykopindex`;
-    
-    log(`Using image URL: ${imageUrl}`);
-
     // Format the post content
     const postContent = `[Krach & Śmieciuch Index](https://wykop-index.appwrite.network/) - stan na ${new Date(latestSentiment.$createdAt).toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw' })}
 
@@ -72,32 +67,58 @@ ${latestSentiment.tomekSentiment ? `\nTomekIndicator®: ${latestSentiment.tomekS
 
 #gielda #wykopindex #krachsmieciuchindex`;
 
+    // Try to upload image, but continue without it if it fails
+    let photoKey = null;
+    try {
+      const fileId = latestSentiment.imageId || 'wykopindex';
+      
+      if (latestSentiment.imageId) {
+        log(`Using custom image: ${fileId}`);
+      } else {
+        log(`No imageId found, trying default image: ${fileId}`);
+      }
 
-    log("Uploading image to Wykop");
+      const imageUrl = `${process.env.BUCKET_URL}/files/${fileId}/view?project=wykopindex`;
+      log(`Uploading image to Wykop: ${imageUrl}`);
 
-    const uploadResponse = await fetch('https://wykop.pl/api/v3/media/photos?type=comments', {
-      method: 'POST',
-      headers: {
-        'accept': 'application/json',
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${wykopToken}`
-      },
-      body: JSON.stringify({
-        data: {
-          url: imageUrl
-        }
-      })
-    });
+      const uploadResponse = await fetch('https://wykop.pl/api/v3/media/photos?type=comments', {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${wykopToken}`
+        },
+        body: JSON.stringify({
+          data: {
+            url: imageUrl
+          }
+        })
+      });
 
-    if (!uploadResponse.ok) {
-      const errorText = await uploadResponse.text();
-      throw new Error(`Failed to upload image to Wykop: ${uploadResponse.status} ${errorText}`);
+      if (uploadResponse.ok) {
+        const uploadResult = await uploadResponse.json();
+        photoKey = uploadResult.data.key;
+        log(`Image uploaded successfully with key: ${photoKey}`);
+      } else {
+        const errorText = await uploadResponse.text();
+        error(`Failed to upload image: ${uploadResponse.status} ${errorText}`);
+        log("Continuing without image");
+      }
+    } catch (imageError) {
+      error(`Error uploading image: ${imageError.message}`);
+      log("Continuing without image");
     }
 
-    const uploadResult = await uploadResponse.json();
-    const photoKey = uploadResult.data.key;
-
     log("Posting to Wykop");
+
+    const postData = {
+      content: postContent,
+      adult: false
+    };
+
+    if (photoKey) {
+      postData.photo = photoKey;
+    }
 
     const postResponse = await fetch('https://wykop.pl/api/v3/entries', {
       method: 'POST',
@@ -107,11 +128,7 @@ ${latestSentiment.tomekSentiment ? `\nTomekIndicator®: ${latestSentiment.tomekS
         'Authorization': `Bearer ${wykopToken}`
       },
       body: JSON.stringify({
-        data: {
-          content: postContent,
-          photo: photoKey,
-          adult: false
-        }
+        data: postData
       })
     });
 
