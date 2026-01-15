@@ -57,11 +57,11 @@ Sentyment: **${latestSentiment.sentiment}/100 ${latestSentiment.sentiment <= 20 
 
 ${latestSentiment.summary}
 
-👤 Topowi analitycy:
-${Array.isArray(mostActiveUsers) && mostActiveUsers.length > 0 ? mostActiveUsers.slice(0, 3).map(user => `• @${user}`).join('\n') : ''}
+Najczęściej omawiane (ostrożnie):
+${Array.isArray(mostDiscussed) && mostDiscussed.length > 0 ? mostDiscussed.slice(0, 3).map(topic => `🔥 ${topic}`).join('\n') : ''}
 
-📉 Najczęściej omawiane (nie kupować, zaraz spadnie):
-${Array.isArray(mostDiscussed) && mostDiscussed.length > 0 ? mostDiscussed.slice(0, 3).map(topic => `• ${topic}`).join('\n') : ''}
+Topowi analitycy:
+${Array.isArray(mostActiveUsers) && mostActiveUsers.length > 0 ? mostActiveUsers.slice(0, 3).map(user => `👤 @${user}`).join('\n') : ''}
 
 ${latestSentiment.tomekSentiment ? `\nTomekIndicator®: ${latestSentiment.tomekSentiment}/100\n${latestSentiment.tomekSummary}` : ''}
 
@@ -70,7 +70,7 @@ ${latestSentiment.tomekSentiment ? `\nTomekIndicator®: ${latestSentiment.tomekS
     // Try to upload image, but continue without it if it fails
     let photoKey = null;
     try {
-      const fileId = latestSentiment.imageId || 'wykopindex';
+      const fileId = latestSentiment.imageId || 'wykopindex_v2';
       
       if (latestSentiment.imageId) {
         log(`Using custom image: ${fileId}`);

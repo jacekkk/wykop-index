@@ -69,7 +69,7 @@ function App() {
 
         // Fetch the composite image from the latest sentiment data
         if (response.documents.length > 0) {
-          const fileId = response.documents[0].imageId || 'wykopindex'; // Default to 'wykopindex' if imageId is null/empty
+          const fileId = response.documents[0].imageId || 'wykopindex_v2'; // Default to 'wykopindex_v2' if imageId is null
           const imageViewUrl = storage.getFileView(
             '6961715000182498a35a', // Bucket ID
             fileId
@@ -232,6 +232,20 @@ function App() {
                     <h3 className="text-sm font-bold text-[#2D2D31] mb-1">Analiza sentymentu</h3>
                     <p className="text-[#2D2D31] font-medium">{item.summary}</p>
                   </div>
+
+                  {item.mostDiscussed && (
+                    <div>
+                      <h3 className="text-sm font-bold text-[#FF0000] mb-1">Najczęściej omawiane (ostrożnie)</h3>
+                      <div className="space-y-1">
+                        {(item.mostDiscussed.startsWith('[') ? JSON.parse(item.mostDiscussed) : item.mostDiscussed.split(',')).map((topic, index) => (
+                          <div key={index} className="flex items-center gap-2 text-[#97979B]">
+                            <span className="text-[#FD366E]">🔥</span>
+                            <span className="text-[#FF0000] font-medium">{typeof topic === 'string' ? topic.trim() : topic}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   
                   {item.mostActiveUsers && (
                     <div>
@@ -241,20 +255,6 @@ function App() {
                           <div key={index} className="flex items-center gap-2 text-[#97979B]">
                             <span className="text-[#FD366E]">👤</span>
                             <span className="text-[#0047AB] font-medium">{typeof user === 'string' ? user.trim() : user}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {item.mostDiscussed && (
-                    <div>
-                      <h3 className="text-sm font-bold text-[#FF0000] mb-1">Najczęściej omawiane</h3>
-                      <div className="space-y-1">
-                        {(item.mostDiscussed.startsWith('[') ? JSON.parse(item.mostDiscussed) : item.mostDiscussed.split(',')).map((topic, index) => (
-                          <div key={index} className="flex items-center gap-2 text-[#97979B]">
-                            <span className="text-[#FD366E]">📉</span>
-                            <span className="text-[#FF0000] font-medium">{typeof topic === 'string' ? topic.trim() : topic}</span>
                           </div>
                         ))}
                       </div>

@@ -20,8 +20,45 @@ export default async ({ req, res, log, error }) => {
     });
 
     const model = 'gemini-3-flash-preview';
-    const systemInstruction = `You are a helpful assistant that analyzes Polish social media sentiment about stock markets.
-    Always respond with a valid JSON, don't include any additional characters or formatting around JSON response.`;
+    const systemInstruction = `You are a helpful assistant that analyzes sentiment about stock markets on a Polish social media platform.
+    Always respond with a valid JSON, don't include any additional characters or formatting around the JSON response.`;
+
+    // Schema validation helper
+    const validateSchema = (data, schema) => {
+      const errors = [];
+      for (const [key, type] of Object.entries(schema)) {
+        if (!(key in data)) {
+          errors.push(`Missing field: ${key}`);
+        } else if (type === 'string' && typeof data[key] !== 'string') {
+          errors.push(`Field ${key} should be string, got ${typeof data[key]}`);
+        } else if (type === 'array' && !Array.isArray(data[key])) {
+          errors.push(`Field ${key} should be array, got ${typeof data[key]}`);
+        } else if (type === 'array' && Array.isArray(data[key])) {
+          // Check that all array elements are strings
+          const nonStringElements = data[key].filter(item => typeof item !== 'string');
+          if (nonStringElements.length > 0) {
+            errors.push(`Field ${key} should be array of strings, but contains non-string elements`);
+          }
+        }
+      }
+      return errors;
+    };
+
+    // Retry helper with exponential backoff
+    const retryWithBackoff = async (fn, maxAttempts = 3, delayMs = 60000) => {
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          return await fn();
+        } catch (err) {
+          if (attempt === maxAttempts) {
+            throw err;
+          }
+          
+          log(`Attempt ${attempt} failed: ${err.message}. Retrying in ${delayMs/1000}s...`);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+      }
+    };
 
     // Authenticate with Wykop API
     const wykopAuthResponse = await fetch('https://wykop.pl/api/v3/auth', {
@@ -89,31 +126,53 @@ export default async ({ req, res, log, error }) => {
 
     log(`Generating sentiment for ${parsedData.length} posts.`);
 
-    const responseFormat = `{"sentiment": "<sentyment. string format>", "summary": "<analiza nastrojow na tagu, max 600 znakow. string format>", "mostActiveUsers": "<top 3 najaktywniejszych uzytkownikow, przy kazdym dodaj (bullish) lub (bearish) i krotki cytat. array format>", "mostDiscussed": "<najczesciej omawiane spolki lub aktywa, max 3, przy kazdym dodaj krotkie uzasadnienie. array format>"}`;
+    const responseFormat = `{"sentiment": "<sentyment (tylko liczba): string>",
+    "summary": "<analiza nastrojow na tagu (max 800 znakow): string>",
+    "mostDiscussed": "<trzy najczesciej omawiane spolki lub aktywa: array of strings, e.g. ["<nazwa aktywa 1>: <krotkie uzasadnienie 1>", "<nazwa aktywa 2>: <krotkie uzasadnienie 2>", "<nazwa aktywa 3>: <krotkie uzasadnienie 3>"]>",
+    "mostActiveUsers": "<top 3 najaktywniejszych uzytkownikow, przy kazdym dodaj (BULLISH) lub (BEARISH) i krotki cytat: array of strings, e.g. ["<nazwa uzytkownika 1> (BULLISH): <krotki cytat 1>", "<nazwa uzytkownika 2> (BEARISH): <krotki cytat 2>", "<nazwa uzytkownika 3> (BULLISH): <krotki cytat 3>"]>"
+    }`;
 
-    const prompt = `Przenalizuj najnowsze wpisy z tagu #gielda na portalu wykop.pl i oszacuj obecny sentyment uzytkownikow w skali 1-100,
+    const prompt = `Przeanalizuj najnowsze wpisy z tagu #gielda na portalu wykop.pl i oszacuj obecny sentyment uzytkownikow w skali 1-100,
     gdzie 1 to ekstremalnie bearish, a 100 to ekstremalnie bullish. Uzyj cytatow jako uzasadnienia.
     Odpowiedz w nastepujacym formacie JSON: ${responseFormat}.
     Wpisy: ${JSON.stringify(parsedData)}`;
 
-    const response = await ai.models.generateContent({
-      model: model,
-      contents: prompt,
-      config: {
-        systemInstruction: systemInstruction,
-        tools: [{urlContext: {}}],
-      },
-    });
+    const sentimentSchema = {
+      sentiment: 'string',
+      summary: 'string',
+      mostDiscussed: 'array',
+      mostActiveUsers: 'array'
+    };
 
     let sentimentResult;
-    try {
-      sentimentResult = JSON.parse(response.text);
-      log("Sentiment: " + sentimentResult.sentiment);
-    } catch (parseError) {
-      error("Failed to parse AI response as JSON: " + parseError.message);
-      error("Raw response: " + response.text);
-      throw new Error("AI returned invalid JSON: " + parseError.message);
-    }
+    await retryWithBackoff(async () => {
+      const response = await ai.models.generateContent({
+        model: model,
+        contents: prompt,
+        config: {
+          systemInstruction: systemInstruction,
+          tools: [{urlContext: {}}],
+        },
+      });
+
+      log("AI response: " + response.text);
+
+      try {
+        sentimentResult = JSON.parse(response.text);
+      } catch (parseError) {
+        error("Failed to parse AI response as JSON: " + parseError.message);
+        error("Raw response: " + response.text);
+        throw new Error("AI returned invalid JSON: " + parseError.message);
+      }
+
+      // Validate schema
+      const schemaErrors = validateSchema(sentimentResult, sentimentSchema);
+      if (schemaErrors.length > 0) {
+        error("Schema validation failed: " + schemaErrors.join(', '));
+        error("Raw response: " + response.text);
+        throw new Error("AI response doesn't match expected schema: " + schemaErrors.join(', '));
+      }
+    });
     
     // Ensure mostActiveUsers and mostDiscussed are strings
     if (Array.isArray(sentimentResult.mostActiveUsers)) {
@@ -172,32 +231,59 @@ export default async ({ req, res, log, error }) => {
       return entry.tags.includes('gielda') && entryDate >= threeDaysAgo;
     });
 
-    log(`Generating Tomek sentiment for ${filteredTomekData.length} posts from the last 3 days.`);
-
-    const tomekResponseFormat = `{"sentiment": "<sentyment>", "summary": "<analiza nastroju Tomka, max 300 znakow>"}`;
-
-    const tomekPrompt = `Z lekka szydera, ale tez sympatia przenalizuj najnowsze wpisy uzytkownika tom-ek12333 z tagu #gielda na portalu wykop.pl.
-    Oszacuj jego obecny sentyment w skali 1-100, gdzie 1 to ekstremalnie bearish, a 100 to ekstremalnie bullish. Uzyj cytatow jako uzasadnienia.
-    Odpowiedz w nastepujacym formacie JSON: ${tomekResponseFormat}.
-    Wpisy: ${JSON.stringify(filteredTomekData)}`;
-
-    const tomekResponse = await ai.models.generateContent({
-      model: model,
-      contents: tomekPrompt,
-      config: {
-        systemInstruction: systemInstruction,
-        tools: [{urlContext: {}}],
-      },
-    });
-
     let tomekSentimentResult;
-    try {
-      tomekSentimentResult = JSON.parse(tomekResponse.text);
-      log("Tomek sentiment: " + tomekSentimentResult.sentiment);
-    } catch (parseError) {
-      error("Failed to parse Tomek AI response as JSON: " + parseError.message);
-      error("Raw response: " + tomekResponse.text);
-      throw new Error("Tomek AI returned invalid JSON: " + parseError.message);
+
+    if (filteredTomekData.length === 0) {
+      log("No Tomek posts found in the last 3 days with #gielda tag.");
+      tomekSentimentResult = {
+        sentiment: "0",
+        summary: "Tomek od kilku dni siedzi cicho - albo mamy pompę stulecia i siedzi w norze, albo krach stulecia i siedzi na Bahamach za hajs ze 100-letnich obligacji."
+      };
+    } else {
+      log(`Generating Tomek sentiment for ${filteredTomekData.length} posts from the last 3 days.`);
+
+      const tomekResponseFormat = `
+      {"sentiment": "<sentyment (tylko liczba): string>",
+      "summary": "<analiza nastroju Tomka (max 300 znakow): string>"}`;
+
+      const tomekPrompt = `Z lekka szydera, ale tez sympatia przeanalizuj najnowsze wpisy uzytkownika tom-ek12333 z tagu #gielda na portalu wykop.pl.
+      Oszacuj jego obecny sentyment w skali 1-100, gdzie 1 to ekstremalnie bearish, a 100 to ekstremalnie bullish. Uzyj cytatow jako uzasadnienia.
+      Odpowiedz w nastepujacym formacie JSON: ${tomekResponseFormat}.
+      Wpisy: ${JSON.stringify(filteredTomekData)}`;
+
+      const tomekSchema = {
+        sentiment: 'string',
+        summary: 'string'
+      };
+
+      await retryWithBackoff(async () => {
+        const tomekResponse = await ai.models.generateContent({
+          model: model,
+          contents: tomekPrompt,
+          config: {
+            systemInstruction: systemInstruction,
+            tools: [{urlContext: {}}],
+          },
+        });
+
+        log("Tomek AI response: " + tomekResponse.text);
+
+        try {
+          tomekSentimentResult = JSON.parse(tomekResponse.text);
+        } catch (parseError) {
+          error("Failed to parse Tomek AI response as JSON: " + parseError.message);
+          error("Raw response: " + tomekResponse.text);
+          throw new Error("Tomek AI returned invalid JSON: " + parseError.message);
+        }
+
+        // Validate schema
+        const schemaErrors = validateSchema(tomekSentimentResult, tomekSchema);
+        if (schemaErrors.length > 0) {
+          error("Tomek schema validation failed: " + schemaErrors.join(', '));
+          error("Raw response: " + tomekResponse.text);
+          throw new Error("Tomek AI response doesn't match expected schema: " + schemaErrors.join(', '));
+        }
+      });
     }
 
     // --- IMAGE GENERATION SECTION ---
@@ -205,39 +291,33 @@ export default async ({ req, res, log, error }) => {
     try {
       log("Generating image");
       
-      // Download the base image from storage
       const baseImageBuffer = await storage.getFileDownload(
         '6961715000182498a35a', // Bucket ID
-        'wykopindex' // File ID
+        'wykopindex_v2' // File ID
       );
 
-      // Load the base image
       const baseImage = await loadImage(Buffer.from(baseImageBuffer));
       
-      // Create canvas with same dimensions as base image
       const canvas = createCanvas(baseImage.width, baseImage.height);
       const ctx = canvas.getContext('2d');
       
-      // Draw base image
       ctx.drawImage(baseImage, 0, 0);
       
       // Calculate needle parameters (image size: 1433 x 933)
       const sentiment = parseInt(sentimentResult.sentiment);
       const centerX = canvas.width / 2 + 5;
       const centerY = canvas.height * 0.915; // 8.5% from bottom = 91.5% from top (matching frontend)
-      const needleLength = 300; // Fixed length
+      const needleLength = 400; // Fixed length
       const angle = (-90 + (sentiment * 1.8)) * Math.PI / 180; // Convert to radians
       
-      // Draw the needle (triangle arrow) from center pivot point
       ctx.save();
       ctx.translate(centerX, centerY);
       ctx.rotate(angle);
       
-      // Draw triangle pointing up (along needle direction from pivot)
       ctx.beginPath();
       ctx.moveTo(0, -needleLength); // Tip of arrow
-      ctx.lineTo(-8, 0); // width (left base)
-      ctx.lineTo(8, 0); // width (right base)
+      ctx.lineTo(-10, 0); // width (left base)
+      ctx.lineTo(10, 0); // width (right base)
       ctx.closePath();
       
       ctx.fillStyle = '#575757';
@@ -249,10 +329,8 @@ export default async ({ req, res, log, error }) => {
       
       ctx.restore();
       
-      // Convert canvas to buffer
       const imageBuffer = canvas.toBuffer('image/png');
       
-      // Upload to storage as a new file with timestamp
       log("Uploading image to storage");
       const timestamp = Date.now();
       const fileName = `wykopindex-${timestamp}`;

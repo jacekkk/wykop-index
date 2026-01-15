@@ -131,3 +131,8 @@ dist
 
 # Directory used by Appwrite CLI for local development
 .appwrite
+
+# Test image generation files
+test-image.js
+test-output-*.png
+base-image.png
