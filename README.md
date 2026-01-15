@@ -4,22 +4,23 @@ Analiza sentymentu z #gielda na wykop.pl: https://wykop-index.appwrite.network/
 
 ## O projekcie
 
-Dashboard analizujący sentyment z tagu #gielda za pomocą Google Gemini AI. Projekt składa się z trzech komponentów:
+Aplikacja analizuje sentyment z tagu #gielda za pomocą AI (Gemini). Składa się z trzech komponentów:
 
-1. **wykop-index** - funkcja analizująca (Node.js): pobiera 100 wpisów, generuje sentyment 1-100, tworzy obrazek z wskazówką.
-2. **wykop-post** - funkcja publikująca (Node.js): dodaje posta na Wykop.pl #gielda z obecnym sentymentem.
-3. **WykopIndex** - frontend (React): wykres, historia, trendy.
+1. **wykop-index** - funkcja pobiera 100 najnowszych wpisów (z komentarzami), generuje sentyment 1-100, tworzy obrazek z wskazówką, zapisuje w bazie danych.
+2. **wykop-post** - funkcja pobiera najnowszy sentyment z bazy danych i dodaje wpis na #gielda codziennie o 10:30 i 18:30 polskiego czasu.
+3. **WykopIndex** - frontend pobiera najnowszy sentyment z bazy danych i pokazuje go na stronie.
 
-## Setup
+## Setup/Development
 
 ```bash
 # Wymagane env variables:
-# APPWRITE_API_KEY, GEMINI_API_KEY, WYKOP_API_KEY, WYKOP_API_SECRET
+# APPWRITE_API_KEY, GEMINI_API_KEY, WYKOP_API_KEY, WYKOP_API_SECRET, WYKOP_REFRESH_TOKEN
 
-npm install -g appwrite
+npm install -g appwrite-cli # (or brew install appwrite)
+appwrite -v
 appwrite login
-appwrite push functions
-appwrite push sites
+appwrite push functions # update functions
+appwrite push sites # update frontend
 ```
 
 **Disclaimer:** Projekt edukacyjno-rozrywkowy. Nie inwestuj na podstawie sentymentu z wykop.pl ani TomekIndicator®.
