@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import "./App.css";
 import { databases, storage } from "./lib/appwrite";
 import { Query } from "appwrite";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 function App() {
   const [sentimentData, setSentimentData] = useState([]);
@@ -9,13 +10,13 @@ function App() {
   const [imageUrl, setImageUrl] = useState(null);
   const [yesterdaySentiment, setYesterdaySentiment] = useState(null);
   const [weekAgoSentiment, setWeekAgoSentiment] = useState(null);
+  const [historicalData, setHistoricalData] = useState([]);
 
   // Fetch sentiment data and latest image from Appwrite
   useEffect(() => {
     async function fetchData() {
       setLoadingSentiment(true);
       try {
-        // Fetch sentiment data (now includes tomek data)
         const response = await databases.listDocuments(
           '69617178003ac8ef4fba', // Database ID
           'sentiment', // Table ID
@@ -67,6 +68,58 @@ function App() {
           console.error('Error fetching week ago sentiment:', err);
         }
 
+        // Fetch historical data for last 30 days
+        try {
+          const thirtyDaysAgo = new Date();
+          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+          const historicalResponse = await databases.listDocuments(
+            '69617178003ac8ef4fba',
+            'sentiment',
+            [
+              Query.greaterThan('$createdAt', thirtyDaysAgo.toISOString()),
+              Query.orderAsc('$createdAt'),
+              Query.limit(100)
+            ]
+          );
+          
+          const chartData = historicalResponse.documents.map(doc => ({
+            date: new Date(doc.$createdAt).toLocaleDateString('pl-PL', { 
+              day: 'numeric', 
+              month: 'short',
+              timeZone: 'Europe/Warsaw'
+            }),
+            sentiment: doc.sentiment,
+            tomekSentiment: doc.tomekSentiment,
+            timestamp: doc.$createdAt
+          }));
+          
+          // Group by date and calculate averages
+          const groupedByDate = chartData.reduce((acc, item) => {
+            if (!acc[item.date]) {
+              acc[item.date] = {
+                date: item.date,
+                sentiments: [],
+                tomekSentiments: [],
+                timestamp: item.timestamp
+              };
+            }
+            acc[item.date].sentiments.push(item.sentiment);
+            acc[item.date].tomekSentiments.push(item.tomekSentiment);
+            return acc;
+          }, {});
+          
+          const averagedData = Object.values(groupedByDate).map(group => ({
+            date: group.date,
+            sentiment: Math.round(group.sentiments.reduce((sum, val) => sum + val, 0) / group.sentiments.length),
+            tomekSentiment: Math.round(group.tomekSentiments.reduce((sum, val) => sum + val, 0) / group.tomekSentiments.length),
+            timestamp: group.timestamp
+          }));
+          
+          setHistoricalData(averagedData);
+        } catch (err) {
+          console.error('Error fetching historical data:', err);
+        }
+
         // Fetch the composite image from the latest sentiment data
         if (response.documents.length > 0) {
           const fileId = response.documents[0].imageId || 'wykopindex_v2'; // Default to 'wykopindex_v2' if imageId is null
@@ -90,7 +143,7 @@ function App() {
   return (
     <main className="flex flex-col items-center p-5 min-h-screen bg-white">
       {/* Sentiment Data Display */}
-      <section className="mt-6 w-full max-w-4xl">
+      <section className="mt-2 w-full max-w-4xl">
         {loadingSentiment ? (
           <div className="flex justify-center items-center p-8">
             <div role="status">
@@ -229,13 +282,13 @@ function App() {
                 
                 <div className="space-y-4 mt-6">
                   <div>
-                    <h3 className="text-sm font-bold text-[#2D2D31] mb-1">Analiza sentymentu</h3>
+                    <h3 className="text-xl font-bold text-[#2D2D31] mb-1">Analiza sentymentu</h3>
                     <p className="text-[#2D2D31] font-medium">{item.summary}</p>
                   </div>
 
                   {item.mostDiscussed && (
-                    <div>
-                      <h3 className="text-sm font-bold text-[#FF0000] mb-1">Najczęściej omawiane (ostrożnie)</h3>
+                    <div className="mt-6">
+                      <h3 className="text-xl font-bold text-[#FF0000] mb-1">Najczęściej omawiane (ostrożnie)</h3>
                       <div className="space-y-1">
                         {(item.mostDiscussed.startsWith('[') ? JSON.parse(item.mostDiscussed) : item.mostDiscussed.split(',')).map((topic, index) => (
                           <div key={index} className="flex items-center gap-2 text-[#97979B]">
@@ -248,8 +301,8 @@ function App() {
                   )}
                   
                   {item.mostActiveUsers && (
-                    <div>
-                      <h3 className="text-sm font-bold text-[#0047AB] mb-1">Topowi analitycy</h3>
+                    <div className="mt-6">
+                      <h3 className="text-xl font-bold text-[#0047AB] mb-1">Topowi analitycy</h3>
                       <div className="space-y-1">
                         {(item.mostActiveUsers.startsWith('[') ? JSON.parse(item.mostActiveUsers) : item.mostActiveUsers.split(',')).map((user, index) => (
                           <div key={index} className="flex items-center gap-2 text-[#97979B]">
@@ -262,8 +315,8 @@ function App() {
                   )}
 
                   {item.tomekSentiment && (
-                    <div className="mt-8">
-                        <h3 className="text-sm font-bold text-[#808080] mb-1">TomekIndicator®</h3>
+                    <div className="mt-6">
+                        <h3 className="text-xl font-bold text-[#808080] mb-1">TomekIndicator®</h3>
                         <div className="space-y-2">
                           <div>
                             <div className="flex items-center gap-3 mb-2">
@@ -299,6 +352,51 @@ function App() {
                     </div>
                   )}
                 </div>
+                {/* Historical Chart */}
+                {historicalData.length > 0 && (
+                  <div className="mt-6">
+                    <h3 className="text-xl font-bold text-[#2D2D31] mb-1">Ostatnie 30 dni</h3>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <LineChart data={historicalData} margin={{ top: 5, right: 5, left: -30, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#EDEDF0" />
+                        <XAxis 
+                          dataKey="date" 
+                          stroke="#2D2D31"
+                          style={{ fontSize: '12px' }}
+                        />
+                        <YAxis 
+                          domain={[0, 100]}
+                          stroke="#2D2D31"
+                          style={{ fontSize: '12px' }}
+                        />
+                        <Tooltip 
+                          contentStyle={{ 
+                            backgroundColor: 'white', 
+                            border: '1px solid #EDEDF0',
+                            borderRadius: '4px'
+                          }}
+                        />
+                        <Legend />
+                        <Line 
+                          type="monotone" 
+                          dataKey="sentiment" 
+                          stroke="#0047AB" 
+                          strokeWidth={2}
+                          name="Sentyment"
+                          dot={{ fill: '#0047AB', r: 3 }}
+                        />
+                        <Line 
+                          type="monotone" 
+                          dataKey="tomekSentiment" 
+                          stroke="#808080" 
+                          strokeWidth={2}
+                          name="TomekIndicator®"
+                          dot={{ fill: '#808080', r: 3 }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
                 </div>
               </div>
             ))}

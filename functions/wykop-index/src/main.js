@@ -78,8 +78,9 @@ export default async ({ req, res, log, error }) => {
     const wykopAuthResponseJson = await wykopAuthResponse.json();
     const wykopToken = wykopAuthResponseJson.data.token;
 
-    // Fetch page 1 and page 2
-    const [wykopWpisyResponse1, wykopWpisyResponse2] = await Promise.all([
+    // --- FETCH WYKOP DATA SECTION ---
+
+    const [wykopWpisyResponse1, wykopWpisyResponse2, wykopWpisyResponse3, wykopWpisyResponse4] = await Promise.all([
       fetch('https://wykop.pl/api/v3/tags/gielda/stream?page=1&limit=50&sort=all&type=all&multimedia=false', {
         method: 'GET',
         headers: {
@@ -93,38 +94,68 @@ export default async ({ req, res, log, error }) => {
           'accept': 'application/json',
           'Authorization': `Bearer ${wykopToken}`
         }
-      })
+      }),
+      fetch('https://wykop.pl/api/v3/tags/gielda/stream?page=3&limit=50&sort=all&type=all&multimedia=false', {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json',
+          'Authorization': `Bearer ${wykopToken}`
+        }
+      }),
+      fetch('https://wykop.pl/api/v3/tags/gielda/stream?page=4&limit=50&sort=all&type=all&multimedia=false', {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json',
+          'Authorization': `Bearer ${wykopToken}`
+        }
+      }),
     ]);
 
-    const [wykopWpisyResponseJson1, wykopWpisyResponseJson2] = await Promise.all([
+    const [wykopWpisyResponseJson1, wykopWpisyResponseJson2, wykopWpisyResponseJson3, wykopWpisyResponseJson4] = await Promise.all([
       wykopWpisyResponse1.json(),
-      wykopWpisyResponse2.json()
+      wykopWpisyResponse2.json(),
+      wykopWpisyResponse3.json(),
+      wykopWpisyResponse4.json()
     ]);
 
-    // Combine data from both pages
-    const allData = [...wykopWpisyResponseJson1.data, ...wykopWpisyResponseJson2.data];
+    const nowPoland = new Date().toLocaleString('en-US', { timeZone: 'Europe/Warsaw' });
+    const currentTime = new Date(nowPoland);
+    const twelveHoursAgo = new Date(currentTime.getTime() - 12 * 60 * 60 * 1000);
+    const twentyFourHoursAgo = new Date(currentTime.getTime() - 24 * 60 * 60 * 1000);
 
-    // Parse and filter the Wykop data
+    const allData = [...wykopWpisyResponseJson1.data, ...wykopWpisyResponseJson2.data, ...wykopWpisyResponseJson3.data, ...wykopWpisyResponseJson4.data];
+    const recentData = allData.filter(entry => {
+      // created_at format: "2026-01-16 11:27:44"
+      const entryDate = new Date(entry.created_at.replace(' ', 'T'));
+      return entryDate >= twelveHoursAgo;
+    });
+
+    log(`Got ${recentData.length} posts from the last 12 hours.`);
+
     const parseComment = (comment) => ({
       id: comment.id,
       username: comment.author.username,
       created_at: comment.created_at,
       votes: comment.votes.up,
       content: comment.content,
-      media: comment.media
+      photo_url: comment.media?.photo?.url || null,
+      embed_url: comment.media?.embed?.url || null
     });
 
-    const parsedData = allData.map(entry => ({
+    const parsePosts = (posts) => posts.map(entry => ({
       id: entry.id,
       username: entry.author.username,
       created_at: entry.created_at,
       votes: entry.votes.up,
       content: entry.content,
       comments: entry.comments?.items?.map(parseComment),
-      media: entry.media
+      photo_url: entry.media?.photo?.url || null,
+      embed_url: entry.media?.embed?.url || null
     }));
 
-    log(`Generating sentiment for ${parsedData.length} posts.`);
+    const parsedData = parsePosts(recentData);
+
+    log(`Generating sentiment for ${parsedData.length} posts between hours: ${parsedData[parsedData.length -1].created_at} - ${parsedData[0].created_at}.`);
 
     const responseFormat = `{"sentiment": "<sentyment (tylko liczba): string>",
     "summary": "<analiza nastrojow na tagu (max 800 znakow): string>",
@@ -155,7 +186,7 @@ export default async ({ req, res, log, error }) => {
         },
       });
 
-      log("AI response: " + response.text);
+      log("AI response: " + JSON.stringify(response.text));
 
       try {
         sentimentResult = JSON.parse(response.text);
@@ -184,7 +215,6 @@ export default async ({ req, res, log, error }) => {
 
     // --- TOMEK INDICATOR SECTION ---
 
-    // Fetch Tomek's posts
     const [tomekResponse1, tomekResponse2] = await Promise.all([
       fetch('https://wykop.pl/api/v3/profile/users/tom-ek12333/actions?page=1&limit=50', {
         method: 'GET',
@@ -207,41 +237,25 @@ export default async ({ req, res, log, error }) => {
       tomekResponse2.json()
     ]);
 
-    // Combine Tomek's data
     const allTomekData = [...tomekJson1.data, ...tomekJson2.data];
-
-    // Parse Tomek's data
-    const parsedTomekData = allTomekData.map(entry => ({
-      id: entry.id,
-      username: entry.author.username,
-      created_at: entry.created_at,
-      votes: entry.votes.up,
-      tags: entry.tags,
-      content: entry.content,
-      comments: entry.comments?.items?.map(parseComment),
-      media: entry.media
-    }));
-
-    // Filter for #gielda posts from last 3 days
-    const now = new Date();
-    const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
-    
-    const filteredTomekData = parsedTomekData.filter(entry => {
-      const entryDate = new Date(entry.created_at);
-      return entry.tags.includes('gielda') && entryDate >= threeDaysAgo;
+    const recentTomekData = allTomekData.filter(entry => {
+      const entryDate = new Date(entry.created_at.replace(' ', 'T'));
+      return entryDate >= twentyFourHoursAgo;
     });
+
+    log(`Got ${recentTomekData.length} Tomek posts between hours: ${recentTomekData[recentTomekData.length -1].created_at} - ${recentTomekData[0].created_at}.`);
+
+    const parsedTomekData = parsePosts(recentTomekData);
 
     let tomekSentimentResult;
 
-    if (filteredTomekData.length === 0) {
-      log("No Tomek posts found in the last 3 days with #gielda tag.");
+    if (parsedTomekData.length === 0) {
+      log("No Tomek posts found in the last 24 hours with #gielda tag.");
       tomekSentimentResult = {
         sentiment: "0",
-        summary: "Tomek od kilku dni siedzi cicho - albo mamy pompę stulecia i siedzi w norze, albo krach stulecia i siedzi na Bahamach za hajs ze 100-letnich obligacji."
+        summary: "Tomek od wczoraj siedzi cicho - albo mamy pompę stulecia i siedzi w norze, albo krach stulecia i siedzi na Bahamach za hajs ze 100-letnich obligacji."
       };
     } else {
-      log(`Generating Tomek sentiment for ${filteredTomekData.length} posts from the last 3 days.`);
-
       const tomekResponseFormat = `
       {"sentiment": "<sentyment (tylko liczba): string>",
       "summary": "<analiza nastroju Tomka (max 300 znakow): string>"}`;
@@ -249,7 +263,7 @@ export default async ({ req, res, log, error }) => {
       const tomekPrompt = `Z lekka szydera, ale tez sympatia przeanalizuj najnowsze wpisy uzytkownika tom-ek12333 z tagu #gielda na portalu wykop.pl.
       Oszacuj jego obecny sentyment w skali 1-100, gdzie 1 to ekstremalnie bearish, a 100 to ekstremalnie bullish. Uzyj cytatow jako uzasadnienia.
       Odpowiedz w nastepujacym formacie JSON: ${tomekResponseFormat}.
-      Wpisy: ${JSON.stringify(filteredTomekData)}`;
+      Wpisy: ${JSON.stringify(parsedTomekData)}`;
 
       const tomekSchema = {
         sentiment: 'string',
@@ -266,7 +280,7 @@ export default async ({ req, res, log, error }) => {
           },
         });
 
-        log("Tomek AI response: " + tomekResponse.text);
+        log("Tomek AI response: " + JSON.stringify(tomekResponse.text));
 
         try {
           tomekSentimentResult = JSON.parse(tomekResponse.text);
