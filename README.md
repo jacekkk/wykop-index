@@ -23,4 +23,4 @@ appwrite push functions # update functions
 appwrite push sites # update frontend
 ```
 
-**Uwaga:** Projekt edukacyjno-rozrywkowy. Nie inwestuj na podstawie sentymentu z wykop.pl ani TomekIndicator®.
+Projekt edukacyjno-rozrywkowy. Nie inwestuj na podstawie sentymentu z wykop.pl ani TomekIndicator®.
