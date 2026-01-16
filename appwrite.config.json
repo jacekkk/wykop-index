@@ -59,9 +59,9 @@
             "commands": "npm install",
             "specification": "s-0.5vcpu-512mb",
             "path": "functions/wykop-index",
-            "providerRepositoryId": "",
-            "providerBranch": "",
-            "providerRootDirectory": "",
+            "providerRepositoryId": null,
+            "providerBranch": null,
+            "providerRootDirectory": null,
             "providerSilentMode": false
         },
         {
@@ -81,9 +81,9 @@
             "commands": "npm install",
             "specification": "s-0.5vcpu-512mb",
             "path": "functions/wykop-post",
-            "providerRepositoryId": "",
-            "providerBranch": "",
-            "providerRootDirectory": "",
+            "providerRepositoryId": null,
+            "providerBranch": null,
+            "providerRootDirectory": null,
             "providerSilentMode": false
         }
     ],
@@ -204,9 +204,9 @@
             "adapter": "static",
             "fallbackFile": "index.html",
             "path": "sites/WykopIndex",
-            "providerRepositoryId": "",
-            "providerBranch": "",
-            "providerRootDirectory": "",
+            "providerRepositoryId": null,
+            "providerBranch": null,
+            "providerRootDirectory": null,
             "providerSilentMode": false
         }
     ]
