@@ -1,6 +1,6 @@
 # Wykop Krach & Śmieciuch Index
 
-Analiza sentymentu z #gielda na wykop.pl: https://wykop-index.appwrite.network/
+Analiza sentymentu z tagu #gielda na wykop.pl: https://wykop-index.appwrite.network/
 
 ## O projekcie
 
