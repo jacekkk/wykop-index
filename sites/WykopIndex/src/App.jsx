@@ -17,6 +17,7 @@ function App() {
     async function fetchData() {
       setLoadingSentiment(true);
       try {
+        // Fetch the latest sentiment entry
         const response = await databases.listDocuments(
           '69617178003ac8ef4fba', // Database ID
           'sentiment', // Table ID
@@ -26,47 +27,6 @@ function App() {
           ]
         );
         setSentimentData(response.documents);
-
-        // Fetch the most recent sentiment from yesterday (previous calendar day)
-        try {
-          const startOfToday = new Date();
-          startOfToday.setHours(0, 0, 0, 0);
-          const yesterdayResponse = await databases.listDocuments(
-            '69617178003ac8ef4fba',
-            'sentiment',
-            [
-              Query.lessThan('$createdAt', startOfToday.toISOString()),
-              Query.orderDesc('$createdAt'),
-              Query.limit(1)
-            ]
-          );
-          if (yesterdayResponse.documents.length > 0) {
-            setYesterdaySentiment(yesterdayResponse.documents[0].sentiment);
-          }
-        } catch (err) {
-          console.error('Error fetching yesterday sentiment:', err);
-        }
-
-        // Fetch the most recent sentiment from 7 days ago
-        try {
-          const startOf7DaysAgo = new Date();
-          startOf7DaysAgo.setDate(startOf7DaysAgo.getDate() - 7);
-          startOf7DaysAgo.setHours(0, 0, 0, 0);
-          const weekAgoResponse = await databases.listDocuments(
-            '69617178003ac8ef4fba',
-            'sentiment',
-            [
-              Query.lessThan('$createdAt', startOf7DaysAgo.toISOString()),
-              Query.orderDesc('$createdAt'),
-              Query.limit(1)
-            ]
-          );
-          if (weekAgoResponse.documents.length > 0) {
-            setWeekAgoSentiment(weekAgoResponse.documents[0].sentiment);
-          }
-        } catch (err) {
-          console.error('Error fetching week ago sentiment:', err);
-        }
 
         // Fetch historical data for last 30 days
         try {
@@ -84,13 +44,14 @@ function App() {
           
           const chartData = historicalResponse.documents.map(doc => ({
             date: new Date(doc.$createdAt).toLocaleDateString('pl-PL', { 
-              day: 'numeric', 
-              month: 'short',
+              day: '2-digit', 
+              month: '2-digit',
               timeZone: 'Europe/Warsaw'
             }),
             sentiment: doc.sentiment,
             tomekSentiment: doc.tomekSentiment,
-            timestamp: doc.$createdAt
+            timestamp: doc.$createdAt,
+            createdAt: new Date(doc.$createdAt)
           }));
           
           // Group by date and calculate averages
@@ -116,6 +77,32 @@ function App() {
           }));
           
           setHistoricalData(averagedData);
+
+          // Extract yesterday's sentiment from averaged data
+          const yesterday = new Date();
+          yesterday.setDate(yesterday.getDate() - 1);
+          const yesterdayFormatted = yesterday.toLocaleDateString('pl-PL', {
+            day: '2-digit',
+            month: '2-digit',
+            timeZone: 'Europe/Warsaw'
+          });
+          const yesterdayData = averagedData.find(item => item.date === yesterdayFormatted);
+          if (yesterdayData) {
+            setYesterdaySentiment(yesterdayData.sentiment);
+          }
+
+          // Extract week ago sentiment from averaged data
+          const weekAgo = new Date();
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          const weekAgoFormatted = weekAgo.toLocaleDateString('pl-PL', {
+            day: '2-digit',
+            month: '2-digit',
+            timeZone: 'Europe/Warsaw'
+          });
+          const weekAgoData = averagedData.find(item => item.date === weekAgoFormatted);
+          if (weekAgoData) {
+            setWeekAgoSentiment(weekAgoData.sentiment);
+          }
         } catch (err) {
           console.error('Error fetching historical data:', err);
         }
@@ -282,13 +269,13 @@ function App() {
                 
                 <div className="space-y-4 mt-6">
                   <div>
-                    <h3 className="text-xl font-bold text-[#2D2D31] mb-1">Analiza sentymentu</h3>
+                    <h3 className="text-lg font-bold text-[#2D2D31] mb-1">Analiza sentymentu</h3>
                     <p className="text-[#2D2D31] font-medium">{item.summary}</p>
                   </div>
 
                   {item.mostDiscussed && (
                     <div className="mt-6">
-                      <h3 className="text-xl font-bold text-[#FF0000] mb-1">Najczęściej omawiane (ostrożnie)</h3>
+                      <h3 className="text-lg font-bold text-[#FF0000] mb-1">Najczęściej omawiane</h3>
                       <div className="space-y-1">
                         {(item.mostDiscussed.startsWith('[') ? JSON.parse(item.mostDiscussed) : item.mostDiscussed.split(',')).map((topic, index) => (
                           <div key={index} className="flex items-center gap-2 text-[#97979B]">
@@ -302,7 +289,7 @@ function App() {
                   
                   {item.mostActiveUsers && (
                     <div className="mt-6">
-                      <h3 className="text-xl font-bold text-[#0047AB] mb-1">Topowi analitycy</h3>
+                      <h3 className="text-lg font-bold text-[#0047AB] mb-1">Topowi analitycy</h3>
                       <div className="space-y-1">
                         {(item.mostActiveUsers.startsWith('[') ? JSON.parse(item.mostActiveUsers) : item.mostActiveUsers.split(',')).map((user, index) => (
                           <div key={index} className="flex items-center gap-2 text-[#97979B]">
@@ -316,7 +303,7 @@ function App() {
 
                   {item.tomekSentiment && (
                     <div className="mt-6">
-                        <h3 className="text-xl font-bold text-[#808080] mb-1">TomekIndicator®</h3>
+                        <h3 className="text-lg font-bold text-[#808080] mb-1">TomekIndicator®</h3>
                         <div className="space-y-2">
                           <div>
                             <div className="flex items-center gap-3 mb-2">
@@ -355,7 +342,7 @@ function App() {
                 {/* Historical Chart */}
                 {historicalData.length > 0 && (
                   <div className="mt-6">
-                    <h3 className="text-xl font-bold text-[#2D2D31] mb-1">Ostatnie 30 dni</h3>
+                    <h3 className="text-lg font-bold text-[#2D2D31] mb-1">Ostatnie 30 dni</h3>
                     <ResponsiveContainer width="100%" height={300}>
                       <LineChart data={historicalData} margin={{ top: 5, right: 5, left: -30, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#EDEDF0" />
@@ -363,6 +350,7 @@ function App() {
                           dataKey="date" 
                           stroke="#2D2D31"
                           style={{ fontSize: '12px' }}
+                          interval="preserveStartEnd"
                         />
                         <YAxis 
                           domain={[0, 100]}

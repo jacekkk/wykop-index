@@ -61,7 +61,7 @@
             "path": "functions/wykop-index",
             "providerRepositoryId": "1132795918",
             "providerBranch": "main",
-            "providerRootDirectory": "functions/wykop-index",
+            "providerRootDirectory": "./functions/wykop-index",
             "providerSilentMode": false
         },
         {
@@ -83,7 +83,7 @@
             "path": "functions/wykop-post",
             "providerRepositoryId": "1132795918",
             "providerBranch": "main",
-            "providerRootDirectory": "functions/wykop-post",
+            "providerRootDirectory": "./functions/wykop-post",
             "providerSilentMode": false
         }
     ],
@@ -206,7 +206,7 @@
             "path": "sites/WykopIndex",
             "providerRepositoryId": "1132795918",
             "providerBranch": "main",
-            "providerRootDirectory": "sites/WykopIndex",
+            "providerRootDirectory": "./sites/WykopIndex",
             "providerSilentMode": false
         }
     ]
