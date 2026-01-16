@@ -58,11 +58,7 @@
             "entrypoint": "src/main.js",
             "commands": "npm install",
             "specification": "s-0.5vcpu-512mb",
-            "path": "functions/wykop-index",
-            "providerRepositoryId": null,
-            "providerBranch": null,
-            "providerRootDirectory": null,
-            "providerSilentMode": false
+            "path": "functions/wykop-index"
         },
         {
             "$id": "wykop-post",
@@ -80,11 +76,7 @@
             "entrypoint": "src/main.js",
             "commands": "npm install",
             "specification": "s-0.5vcpu-512mb",
-            "path": "functions/wykop-post",
-            "providerRepositoryId": null,
-            "providerBranch": null,
-            "providerRootDirectory": null,
-            "providerSilentMode": false
+            "path": "functions/wykop-post"
         }
     ],
     "tablesDB": [
@@ -203,11 +195,7 @@
             "buildRuntime": "node-22",
             "adapter": "static",
             "fallbackFile": "index.html",
-            "path": "sites/WykopIndex",
-            "providerRepositoryId": null,
-            "providerBranch": null,
-            "providerRootDirectory": null,
-            "providerSilentMode": false
+            "path": "sites/WykopIndex"
         }
     ]
 }
