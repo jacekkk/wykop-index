@@ -283,8 +283,8 @@ function App() {
                       <div className="space-y-1">
                         {(item.mostDiscussed.startsWith('[') ? JSON.parse(item.mostDiscussed) : item.mostDiscussed.split(',')).map((topic, index) => (
                           <div key={index} className="flex items-center gap-2 text-[#97979B]">
-                            <span className="text-[#FD366E]">🔥</span>
-                            <span className="text-[#FF0000] font-medium">{typeof topic === 'string' ? topic.trim() : topic}</span>
+                            <span className="text-[#2D2D31]">🔥</span>
+                            <span className="text-[#2D2D31] font-medium">{typeof topic === 'string' ? topic.trim() : topic}</span>
                           </div>
                         ))}
                       </div>
@@ -299,8 +299,8 @@ function App() {
                       <div className="space-y-1">
                         {(item.mostActiveUsers.startsWith('[') ? JSON.parse(item.mostActiveUsers) : item.mostActiveUsers.split(',')).map((user, index) => (
                           <div key={index} className="flex items-center gap-2 text-[#97979B]">
-                            <span className="text-[#FD366E]">👤</span>
-                            <span className="text-[#0047AB] font-medium">{typeof user === 'string' ? user.trim() : user}</span>
+                            <span className="text-[#2D2D31]">👤</span>
+                            <span className="text-[#2D2D31] font-medium">{typeof user === 'string' ? user.trim() : user}</span>
                           </div>
                         ))}
                       </div>
