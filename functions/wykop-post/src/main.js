@@ -51,13 +51,22 @@ export default async ({ req, res, log, error }) => {
     const mostDiscussed = JSON.parse(latestSentiment.mostDiscussed);
 
     // Format the post content
-    const postContent = `[Krach & Śmieciuch Index](https://wykop-index.appwrite.network/) - stan na ${new Date(latestSentiment.$createdAt).toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw' })}
+    const formattedDate = new Date(latestSentiment.$createdAt).toLocaleString('pl-PL', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Europe/Warsaw'
+    });
+    
+    const postContent = `[Krach & Śmieciuch Index](https://wykop-index.appwrite.network/) - stan na ${formattedDate}
 
-Sentyment: **${latestSentiment.sentiment}/100 ${latestSentiment.sentiment <= 20 ? '💩' : latestSentiment.sentiment <= 40 ? '🚽' : latestSentiment.sentiment <= 60 ? '🆗' : latestSentiment.sentiment <= 80 ? '🚀' : '🔥'}**
+**${latestSentiment.sentiment}/100 ${latestSentiment.sentiment <= 20 ? '💩' : latestSentiment.sentiment <= 40 ? '🚽' : latestSentiment.sentiment <= 60 ? '🆗' : latestSentiment.sentiment <= 80 ? '🚀' : '🔥'}**
 
 ${latestSentiment.summary}
 
-Najczęściej omawiane (ostrożnie):
+Najczęściej omawiane:
 ${Array.isArray(mostDiscussed) && mostDiscussed.length > 0 ? mostDiscussed.slice(0, 3).map(topic => `🔥 ${topic}`).join('\n') : ''}
 
 Topowi analitycy:

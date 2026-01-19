@@ -128,7 +128,7 @@ function App() {
   }, []);
 
   return (
-    <main className="flex flex-col items-center p-5 min-h-screen bg-white">
+    <main className="flex flex-col items-center p-2 md:p-5 min-h-screen bg-white">
       {/* Sentiment Data Display */}
       <section className="mt-2 w-full max-w-4xl">
         {loadingSentiment ? (
@@ -162,7 +162,7 @@ function App() {
             {sentimentData.map((item) => (
               <div key={item.$id} className="rounded-md bg-white overflow-hidden">
                 {imageUrl && (
-                  <div>
+                  <div className="px-6 pt-6">
                     <img 
                       src={imageUrl} 
                       alt="Wykop sentiment visualization" 
@@ -173,13 +173,13 @@ function App() {
                 <div className="p-6">
                 <div className="flex flex-col items-center mb-4">
                   <div 
-                    className="text-7xl font-bold mb-3"
+                    className="text-5xl font-bold mb-3"
                     style={{
                       color: item.sentiment <= 20 ? '#b91c1c' :
                              item.sentiment <= 40 ? '#ef4444' :
-                             item.sentiment <= 60 ? '#eab308' :
-                             item.sentiment <= 80 ? '#4ade80' :
-                             '#22c55e'
+                             item.sentiment <= 60 ? '#FFBF00' :
+                             item.sentiment <= 80 ? '#4CBB17' :
+                             '#008000'
                     }}
                   >
                     {item.sentiment}
@@ -191,9 +191,9 @@ function App() {
                         width: `${item.sentiment}%`,
                         backgroundColor: item.sentiment <= 20 ? '#b91c1c' :
                                        item.sentiment <= 40 ? '#ef4444' :
-                                       item.sentiment <= 60 ? '#eab308' :
-                                       item.sentiment <= 80 ? '#4ade80' :
-                                       '#22c55e'
+                                       item.sentiment <= 60 ? '#FFBF00' :
+                                       item.sentiment <= 80 ? '#4CBB17' :
+                                       '#008000'
                       }}
                     ></div>
                   </div>
@@ -220,9 +220,9 @@ function App() {
                           style={{
                             color: yesterdaySentiment <= 20 ? '#b91c1c' :
                                    yesterdaySentiment <= 40 ? '#ef4444' :
-                                   yesterdaySentiment <= 60 ? '#eab308' :
-                                   yesterdaySentiment <= 80 ? '#4ade80' :
-                                   '#22c55e'
+                                   yesterdaySentiment <= 60 ? '#FFBF00' :
+                                   yesterdaySentiment <= 80 ? '#4CBB17' :
+                                   '#008000'
                           }}
                         >
                           {yesterdaySentiment}
@@ -247,9 +247,9 @@ function App() {
                           style={{
                             color: weekAgoSentiment <= 20 ? '#b91c1c' :
                                    weekAgoSentiment <= 40 ? '#ef4444' :
-                                   weekAgoSentiment <= 60 ? '#eab308' :
-                                   weekAgoSentiment <= 80 ? '#4ade80' :
-                                   '#22c55e'
+                                   weekAgoSentiment <= 60 ? '#FFBF00' :
+                                   weekAgoSentiment <= 80 ? '#4CBB17' :
+                                   '#008000'
                           }}
                         >
                           {weekAgoSentiment}
@@ -268,14 +268,18 @@ function App() {
                 </div>
                 
                 <div className="space-y-4 mt-6">
-                  <div>
-                    <h3 className="text-lg font-bold text-[#2D2D31] mb-1">Analiza sentymentu</h3>
+                  <div id="analiza-sentymentu">
+                    <h3 className="text-lg font-bold text-[#2D2D31] mb-1">
+                      <a href="#analiza-sentymentu" className="hover:underline">Analiza sentymentu</a>
+                    </h3>
                     <p className="text-[#2D2D31] font-medium">{item.summary}</p>
                   </div>
 
                   {item.mostDiscussed && (
-                    <div className="mt-6">
-                      <h3 className="text-lg font-bold text-[#FF0000] mb-1">Najczęściej omawiane</h3>
+                    <div className="mt-6" id="najczesciej-omawiane">
+                      <h3 className="text-lg font-bold text-[#FF0000] mb-1">
+                        <a href="#najczesciej-omawiane" className="hover:underline">Najczęściej omawiane</a>
+                      </h3>
                       <div className="space-y-1">
                         {(item.mostDiscussed.startsWith('[') ? JSON.parse(item.mostDiscussed) : item.mostDiscussed.split(',')).map((topic, index) => (
                           <div key={index} className="flex items-center gap-2 text-[#97979B]">
@@ -288,8 +292,10 @@ function App() {
                   )}
                   
                   {item.mostActiveUsers && (
-                    <div className="mt-6">
-                      <h3 className="text-lg font-bold text-[#0047AB] mb-1">Topowi analitycy</h3>
+                    <div className="mt-6" id="topowi-analitycy">
+                      <h3 className="text-lg font-bold text-[#0047AB] mb-1">
+                        <a href="#topowi-analitycy" className="hover:underline">Topowi analitycy</a>
+                      </h3>
                       <div className="space-y-1">
                         {(item.mostActiveUsers.startsWith('[') ? JSON.parse(item.mostActiveUsers) : item.mostActiveUsers.split(',')).map((user, index) => (
                           <div key={index} className="flex items-center gap-2 text-[#97979B]">
@@ -302,19 +308,17 @@ function App() {
                   )}
 
                   {item.tomekSentiment && (
-                    <div className="mt-6">
-                        <h3 className="text-lg font-bold text-[#808080] mb-1">TomekIndicator®</h3>
+                    <div className="mt-6" id="tomekindicator">
+                        <h3 className="text-lg font-bold text-[#808080] mb-1">
+                          <a href="#tomekindicator" className="hover:underline">TomekIndicator®</a>
+                        </h3>
                         <div className="space-y-2">
                           <div>
                             <div className="flex items-center gap-3 mb-2">
                               <div 
                                 className="text-2xl font-bold"
                                 style={{
-                                  color: item.tomekSentiment <= 20 ? '#b91c1c' :
-                                         item.tomekSentiment <= 40 ? '#ef4444' :
-                                         item.tomekSentiment <= 60 ? '#eab308' :
-                                         item.tomekSentiment <= 80 ? '#4ade80' :
-                                         '#22c55e'
+                                  color: '#808080'
                                 }}
                               >
                                 {item.tomekSentiment}
@@ -324,11 +328,7 @@ function App() {
                                   className="h-full"
                                   style={{ 
                                     width: `${item.tomekSentiment}%`,
-                                    backgroundColor: item.tomekSentiment <= 20 ? '#b91c1c' :
-                                                   item.tomekSentiment <= 40 ? '#ef4444' :
-                                                   item.tomekSentiment <= 60 ? '#eab308' :
-                                                   item.tomekSentiment <= 80 ? '#4ade80' :
-                                                   '#22c55e'
+                                    backgroundColor: '#808080'
                                   }}
                                 ></div>
                               </div>
@@ -341,8 +341,10 @@ function App() {
                 </div>
                 {/* Historical Chart */}
                 {historicalData.length > 0 && (
-                  <div className="mt-6">
-                    <h3 className="text-lg font-bold text-[#2D2D31] mb-1">Ostatnie 30 dni</h3>
+                  <div className="mt-6" id="ostatnie-30-dni">
+                    <h3 className="text-lg font-bold text-[#2D2D31] mb-1">
+                      <a href="#ostatnie-30-dni" className="hover:underline">Ostatnie 30 dni</a>
+                    </h3>
                     <ResponsiveContainer width="100%" height={300}>
                       <LineChart data={historicalData} margin={{ top: 5, right: 5, left: -30, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#EDEDF0" />
@@ -370,7 +372,7 @@ function App() {
                           dataKey="sentiment" 
                           stroke="#0047AB" 
                           strokeWidth={2}
-                          name="Sentyment"
+                          name="Krach & Śmieciuch Index"
                           dot={{ fill: '#0047AB', r: 3 }}
                         />
                         <Line 
