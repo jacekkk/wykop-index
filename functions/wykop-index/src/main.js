@@ -258,7 +258,7 @@ export default async ({ req, res, log, error }) => {
     } else {
       const tomekResponseFormat = `
       {"sentiment": "<sentyment (tylko liczba): string>",
-      "summary": "<analiza nastroju Tomka (max 300 znakow): string>"}`;
+      "summary": "<analiza nastroju Tomka (max 500 znakow): string>"}`;
 
       const tomekPrompt = `Z lekka szydera, ale tez sympatia przeanalizuj najnowsze wpisy uzytkownika tom-ek12333 z tagu #gielda na portalu wykop.pl.
       Oszacuj jego obecny sentyment w skali 1-100, gdzie 1 to ekstremalnie bearish, a 100 to ekstremalnie bullish. Uzyj cytatow jako uzasadnienia.
