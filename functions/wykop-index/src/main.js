@@ -19,7 +19,7 @@ export default async ({ req, res, log, error }) => {
       apiKey: process.env.GEMINI_API_KEY,
     });
 
-    const model = 'gemini-3-flash-preview';
+    let model = 'gemini-3-flash-preview';
     const systemInstruction = `You are a helpful assistant that analyzes sentiment about stock markets on a Polish social media platform.
     Always respond with a valid JSON, don't include any additional characters or formatting around the JSON response.`;
 
@@ -45,9 +45,14 @@ export default async ({ req, res, log, error }) => {
     };
 
     // Retry helper with exponential backoff
-    const retryWithBackoff = async (fn, maxAttempts = 3, delayMs = 60000) => {
+    const retryWithBackoff = async (fn, maxAttempts = 3, delayMs = 30000) => {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
+          // Change model to gemini-2.5-flash on 3rd attempt
+          if (attempt === 3) {
+            model = 'gemini-2.5-flash';
+            log('Switching to gemini-2.5-flash for final attempt');
+          }
           return await fn();
         } catch (err) {
           if (attempt === maxAttempts) {
@@ -181,6 +186,9 @@ export default async ({ req, res, log, error }) => {
         model: model,
         contents: prompt,
         config: {
+          httpOptions: {
+            timeout: 60000, // 60 seconds
+          },
           systemInstruction: systemInstruction,
           tools: [{urlContext: {}}],
         },
@@ -275,6 +283,9 @@ export default async ({ req, res, log, error }) => {
           model: model,
           contents: tomekPrompt,
           config: {
+            httpOptions: {
+              timeout: 60000, // 60 seconds
+            },
             systemInstruction: systemInstruction,
             tools: [{urlContext: {}}],
           },
