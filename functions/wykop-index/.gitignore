@@ -134,5 +134,7 @@ dist
 
 # Test image generation files
 test-image.js
+test-notifications.js
+test-output-*.json
 test-output-*.png
 base-image.png

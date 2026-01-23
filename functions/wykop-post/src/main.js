@@ -49,6 +49,7 @@ export default async ({ req, res, log, error }) => {
     const latestSentiment = sentimentResponse.documents[0];
     const mostActiveUsers = JSON.parse(latestSentiment.mostActiveUsers);
     const mostDiscussed = JSON.parse(latestSentiment.mostDiscussed);
+    const mentionsReplies = JSON.parse(latestSentiment.mentionsReplies || '[]');
 
     // Format the post content
     const formattedDate = new Date(latestSentiment.$createdAt).toLocaleString('pl-PL', {
@@ -73,6 +74,8 @@ Topowi analitycy:
 ${Array.isArray(mostActiveUsers) && mostActiveUsers.length > 0 ? mostActiveUsers.slice(0, 3).map(user => `👤 @${user}`).join('\n') : ''}
 
 ${latestSentiment.tomekSentiment ? `\nTomekIndicator®: ${latestSentiment.tomekSentiment}/100\n${latestSentiment.tomekSummary}` : ''}
+
+${Array.isArray(mentionsReplies) && mentionsReplies.length > 0 ? `\nOdpowiedzi:\n${mentionsReplies.map(reply => `💬 @${reply.username}: [${reply.post}](${reply.url})\n${reply.reply}`).join('\n\n')}` : ''}
 
 #gielda #wykopindex #krachsmieciuchindex`;
 

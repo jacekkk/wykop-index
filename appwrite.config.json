@@ -53,7 +53,7 @@
                 "files.write"
             ],
             "events": [],
-            "schedule": "0 8,13,18,22 * * *",
+            "schedule": "0 8,18 * * *",
             "timeout": 300,
             "entrypoint": "src/main.js",
             "commands": "npm install",
@@ -173,6 +173,15 @@
                     "required": false,
                     "array": false,
                     "size": 255,
+                    "default": null,
+                    "encrypt": false
+                },
+                {
+                    "key": "mentionsReplies",
+                    "type": "string",
+                    "required": false,
+                    "array": false,
+                    "size": 5000,
                     "default": null,
                     "encrypt": false
                 }

@@ -127,6 +127,17 @@ function App() {
     fetchData();
   }, []);
 
+  // Scroll to hash anchor after data loads
+  useEffect(() => {
+    if (!loadingSentiment && window.location.hash) {
+      const id = window.location.hash.substring(1);
+      const element = document.getElementById(id);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+  }, [loadingSentiment]);
+
   return (
     <main className="flex flex-col items-center p-2 md:p-5 min-h-screen bg-white">
       {/* Sentiment Data Display */}
@@ -336,6 +347,29 @@ function App() {
                             <p className="text-[#2D2D31] font-medium text-sm">{item.tomekSummary}</p>
                           </div>
                         </div>
+                    </div>
+                  )}
+
+                  {item.mentionsReplies && (
+                    <div className="mt-6" id="odpowiedzi">
+                      <h3 className="text-lg font-bold text-[#008000] mb-1">
+                        <a href="#odpowiedzi" className="hover:underline">Odpowiedzi</a>
+                      </h3>
+                      <div className="space-y-3">
+                        {(item.mentionsReplies.startsWith('[') ? JSON.parse(item.mentionsReplies) : []).map((reply, index) => (
+                          <div key={index} className="flex items-start gap-2 p-3 bg-gray-50 rounded">
+                            <span className="text-[#2D2D31] mt-0.5">💬</span>
+                            <div className="flex-1">
+                              <div className="text-sm text-[#97979B] mb-1">
+                                {reply.username}: <a href={reply.url} target="_blank" rel="noopener noreferrer" className="hover:underline">{reply.post}</a>
+                              </div>
+                              <div className="text-[#2D2D31] font-medium text-sm">
+                                {reply.reply}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>

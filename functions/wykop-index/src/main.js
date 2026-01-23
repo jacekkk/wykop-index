@@ -21,7 +21,8 @@ export default async ({ req, res, log, error }) => {
 
     let model = 'gemini-3-flash-preview';
     const systemInstruction = `You are a helpful assistant that analyzes sentiment about stock markets on a Polish social media platform.
-    Always respond with a valid JSON, don't include any additional characters or formatting around the JSON response.`;
+    The username of an account from which your responses are posted is KrachSmieciuchIndex.
+    ALWAYS respond with a valid JSON, DO NOT include any additional characters or formatting around the JSON response, such as backticks.`;
 
     // Schema validation helper
     const validateSchema = (data, schema) => {
@@ -38,6 +39,14 @@ export default async ({ req, res, log, error }) => {
           const nonStringElements = data[key].filter(item => typeof item !== 'string');
           if (nonStringElements.length > 0) {
             errors.push(`Field ${key} should be array of strings, but contains non-string elements`);
+          }
+        } else if (type === 'array-of-objects' && !Array.isArray(data[key])) {
+          errors.push(`Field ${key} should be array, got ${typeof data[key]}`);
+        } else if (type === 'array-of-objects' && Array.isArray(data[key])) {
+          // Check that all array elements are objects
+          const nonObjectElements = data[key].filter(item => typeof item !== 'object' || item === null);
+          if (nonObjectElements.length > 0) {
+            errors.push(`Field ${key} should be array of objects, but contains non-object elements`);
           }
         }
       }
@@ -66,7 +75,7 @@ export default async ({ req, res, log, error }) => {
     };
 
     // Authenticate with Wykop API
-    const wykopAuthResponse = await fetch('https://wykop.pl/api/v3/auth', {
+    let wykopAuthResponse = await fetch('https://wykop.pl/api/v3/auth', {
       method: 'POST',
       headers: {
         'accept': 'application/json',
@@ -80,8 +89,18 @@ export default async ({ req, res, log, error }) => {
       })
     });
 
-    const wykopAuthResponseJson = await wykopAuthResponse.json();
-    const wykopToken = wykopAuthResponseJson.data.token;
+    if (!wykopAuthResponse.ok) {
+      throw new Error(`Wykop auth failed: ${wykopAuthResponse.status} ${await wykopAuthResponse.text()}`);
+    }
+
+    let wykopAuthResponseJson = await wykopAuthResponse.json();
+    let wykopToken = wykopAuthResponseJson.data.token;
+    log("Successfully authenticated with Wykop");
+
+    const nowPoland = new Date().toLocaleString('en-US', { timeZone: 'Europe/Warsaw' });
+    const currentTime = new Date(nowPoland);
+    const twelveHoursAgo = new Date(currentTime.getTime() - 12 * 60 * 60 * 1000);
+    const twentyFourHoursAgo = new Date(currentTime.getTime() - 24 * 60 * 60 * 1000);
 
     // --- FETCH WYKOP DATA SECTION ---
 
@@ -122,11 +141,6 @@ export default async ({ req, res, log, error }) => {
       wykopWpisyResponse3.json(),
       wykopWpisyResponse4.json()
     ]);
-
-    const nowPoland = new Date().toLocaleString('en-US', { timeZone: 'Europe/Warsaw' });
-    const currentTime = new Date(nowPoland);
-    const twelveHoursAgo = new Date(currentTime.getTime() - 12 * 60 * 60 * 1000);
-    const twentyFourHoursAgo = new Date(currentTime.getTime() - 24 * 60 * 60 * 1000);
 
     const allData = [...wykopWpisyResponseJson1.data, ...wykopWpisyResponseJson2.data, ...wykopWpisyResponseJson3.data, ...wykopWpisyResponseJson4.data];
     const recentData = allData.filter(entry => {
@@ -291,14 +305,14 @@ export default async ({ req, res, log, error }) => {
           },
         });
 
-        log("Tomek AI response: " + JSON.stringify(tomekResponse.text));
+        log("Tomek response: " + JSON.stringify(tomekResponse.text));
 
         try {
           tomekSentimentResult = JSON.parse(tomekResponse.text);
         } catch (parseError) {
-          error("Failed to parse Tomek AI response as JSON: " + parseError.message);
+          error("Failed to parse Tomek response as JSON: " + parseError.message);
           error("Raw response: " + tomekResponse.text);
-          throw new Error("Tomek AI returned invalid JSON: " + parseError.message);
+          throw new Error("Tomek returned invalid JSON: " + parseError.message);
         }
 
         // Validate schema
@@ -306,9 +320,174 @@ export default async ({ req, res, log, error }) => {
         if (schemaErrors.length > 0) {
           error("Tomek schema validation failed: " + schemaErrors.join(', '));
           error("Raw response: " + tomekResponse.text);
-          throw new Error("Tomek AI response doesn't match expected schema: " + schemaErrors.join(', '));
+          throw new Error("Tomek response doesn't match expected schema: " + schemaErrors.join(', '));
         }
       });
+    }
+
+    // --- FETCH NOTIFICATIONS SECTION ---
+    
+    let mentionsResult;
+    try {
+      wykopAuthResponse = await fetch('https://wykop.pl/api/v3/refresh-token', {
+      method: 'POST',
+      headers: {
+        'accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        data: {
+          refresh_token: process.env.WYKOP_REFRESH_TOKEN
+        }
+      })
+    });
+
+    if (!wykopAuthResponse.ok) {
+      throw new Error(`Wykop auth failed: ${wykopAuthResponse.status} ${await wykopAuthResponse.text()}`);
+    }
+
+    wykopAuthResponseJson = await wykopAuthResponse.json();
+    wykopToken = wykopAuthResponseJson.data.token;
+    log("Successfully authenticated with Wykop");
+
+    const [notificationsResponse1, notificationsResponse2] = await Promise.all([
+      fetch('https://wykop.pl/api/v3/notifications/entries?page=1', {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json',
+          'Authorization': `Bearer ${wykopToken}`
+        }
+      }),
+      fetch('https://wykop.pl/api/v3/notifications/entries?page=2', {
+        method: 'GET',
+        headers: {
+          'accept': 'application/json',
+          'Authorization': `Bearer ${wykopToken}`
+        }
+      })
+    ]);
+
+    const [notificationsJson1, notificationsJson2] = await Promise.all([
+      notificationsResponse1.json(),
+      notificationsResponse2.json()
+    ]);
+
+    const allNotifications = [...notificationsJson1.data, ...notificationsJson2.data];
+    const filteredNotifications = allNotifications.filter(notification => {
+      const notificationDate = new Date(notification.created_at.replace(' ', 'T'));
+      if (notificationDate < twentyFourHoursAgo) return false;
+      if (notification.type !== 'new_comment_in_entry' && notification.type !== 'new_entry') return false;
+      if (notification.entry?.author?.username === 'KrachSmieciuchIndex') return false;
+      if (!notification.entry?.tags?.some(tag => tag === 'gielda')) return false;
+      return true;
+    });
+
+    // Fetch full discussion for each unique entry
+    const uniqueEntryIds = [...new Set(filteredNotifications.map(n => n.entry.id))];
+    log(`Fetching full discussions for ${uniqueEntryIds.length} entries...`);
+    
+    const commentsResponses = await Promise.all(
+      uniqueEntryIds.map(entryId =>
+        fetch(`https://wykop.pl/api/v3/entries/${entryId}/comments?page=1&limit=50`, {
+          method: 'GET',
+          headers: {
+            'accept': 'application/json',
+            'Authorization': `Bearer ${wykopToken}`
+          }
+        })
+      )
+    );
+
+    const commentsData = await Promise.all(commentsResponses.map(r => r.json()));
+    
+    // Create a map of entry ID to comments
+    const entryCommentsMap = {};
+    uniqueEntryIds.forEach((entryId, index) => {
+      entryCommentsMap[entryId] = commentsData[index].data || [];
+    });
+
+    // Parse notification entries with full comments
+    const parsedNotifications = filteredNotifications.map(notification => {
+      const entry = notification.entry;
+      const fullComments = entryCommentsMap[entry.id] || [];
+      
+      return {
+        id: entry.id,
+        url: `https://wykop.pl/wpis/${entry.id}`,
+        username: entry.author.username,
+        created_at: entry.created_at,
+        votes: entry.votes.up,
+        content: entry.content,
+        photo_url: entry.media?.photo?.url || null,
+        embed_url: entry.media?.embed?.url || null,
+        comments: fullComments.map(parseComment)
+      };
+    });
+
+    log(`Got ${parsedNotifications.length} relevant notifications from the last 24 hours.`);
+
+    const mentionsResponseFormat = `{
+    "mentionsReplies": "<odpowiedzi do wpisow/komentarzy: array of objects, e.g. [{\"username\": \"<nazwa uzytkownika>\", \"url\": \"<link do wpisu>\", \"post\": \"<cytat lub krotkie streszczenie wpisu/komentarza>\", \"reply\": \"<krotka odpowiedz>\"}, {...}]>"
+    }`;
+
+    if (parsedNotifications.length === 0) {
+      log("No relevant notifications found in the last 24 hours.");
+      mentionsResult = {
+        mentionsReplies: JSON.stringify([])
+      };
+    } else {
+      const mentionsPrompt = `Jestes kontem KrachSmieciuchIndex na wykop.pl.
+      Udziel krotkich odpowiedzi na wpisy/komentarze, w ktorych zostales oznaczony. Jezeli jest ich wiecej niz 5, odpowiedz tylko na 5 najciekawszych.
+      Calkowita dlugosc twojej odpowiedzi nie moze przekroczyc 3000 znakow. Jezeli wpis/komentarz jest dluzszy niz 300 znakow, uzyj streszczenia zamiast cytatu.
+      Odpowiedz w nastepujacym formacie JSON: ${mentionsResponseFormat}.
+      Wpisy: ${JSON.stringify(parsedNotifications)}`;
+
+      const mentionsSchema = {
+        mentionsReplies: 'array-of-objects'
+      };
+
+      await retryWithBackoff(async () => {
+        const mentionsResponse = await ai.models.generateContent({
+          model: model,
+          contents: mentionsPrompt,
+          config: {
+            httpOptions: {
+              timeout: 60000, // 60 seconds
+            },
+            systemInstruction: systemInstruction,
+            tools: [{urlContext: {}}],
+          },
+        });
+
+        log("Mentions response: " + JSON.stringify(mentionsResponse.text));
+
+        try {
+          mentionsResult = JSON.parse(mentionsResponse.text);
+        } catch (parseError) {
+          error("Failed to parse mentions response as JSON: " + parseError.message);
+          error("Raw response: " + mentionsResponse.text);
+          throw new Error("Mentions returned invalid JSON: " + parseError.message);
+        }
+
+        // Validate schema
+        const schemaErrors = validateSchema(mentionsResult, mentionsSchema);
+        if (schemaErrors.length > 0) {
+          error("Mentions schema validation failed: " + schemaErrors.join(', '));
+          error("Raw response: " + mentionsResponse.text);
+          throw new Error("Mentions response doesn't match expected schema: " + schemaErrors.join(', '));
+        }
+      });
+    }
+
+    // Ensure mentionsReplies is a string
+    if (Array.isArray(mentionsResult.mentionsReplies)) {
+      mentionsResult.mentionsReplies = JSON.stringify(mentionsResult.mentionsReplies);
+    }
+    } catch (notificationsError) {
+      error("Failed to fetch or process notifications: " + notificationsError.message);
+      mentionsResult = {
+        mentionsReplies: JSON.stringify([])
+      };
     }
 
     // --- IMAGE GENERATION SECTION ---
@@ -373,6 +552,8 @@ export default async ({ req, res, log, error }) => {
       log("Continuing with null imageId");
     }
 
+    // --- SAVE TO DATABASE SECTION ---
+
     log("Saving to database");
 
     const dbResult = await databases.createDocument(
@@ -386,7 +567,8 @@ export default async ({ req, res, log, error }) => {
           mostDiscussed: sentimentResult.mostDiscussed,
           tomekSentiment: parseInt(tomekSentimentResult.sentiment),
           tomekSummary: tomekSentimentResult.summary,
-          imageId: imageId
+          imageId: imageId,
+          mentionsReplies: mentionsResult.mentionsReplies
         }
     );
 
