@@ -67,15 +67,17 @@ export default async ({ req, res, log, error }) => {
 
 ${latestSentiment.summary}
 
-Najczęściej omawiane:
-${Array.isArray(mostDiscussed) && mostDiscussed.length > 0 ? mostDiscussed.slice(0, 3).map(topic => `🔥 ${topic}`).join('\n') : ''}
+**Najczęściej omawiane:**
+${Array.isArray(mostDiscussed) && mostDiscussed.length > 0 ? mostDiscussed.slice(0, 3).map(topic => `🔥 ${topic.asset}: ${topic.reasoning}`).join('\n') : ''}
 
-Topowi analitycy:
-${Array.isArray(mostActiveUsers) && mostActiveUsers.length > 0 ? mostActiveUsers.slice(0, 3).map(user => `👤 @${user}`).join('\n') : ''}
+**Topowi analitycy:**
+${Array.isArray(mostActiveUsers) && mostActiveUsers.length > 0 ? mostActiveUsers.slice(0, 3).map(user => `👤 @${user.username} (${user.sentiment}): [_"${user.quote}"_](${user.url})`).join('\n') : ''}
 
-${latestSentiment.tomekSentiment ? `\nTomekIndicator®: ${latestSentiment.tomekSentiment}/100\n${latestSentiment.tomekSummary}` : ''}
+${latestSentiment.tomekSentiment ? `\n**TomekIndicator®:** ${latestSentiment.tomekSentiment}/100\n${latestSentiment.tomekSummary}` : ''}
 
-${Array.isArray(mentionsReplies) && mentionsReplies.length > 0 ? `\nOdpowiedzi:\n${mentionsReplies.map(reply => `💬 @${reply.username}: [${reply.post}](${reply.url})\n${reply.reply}`).join('\n\n')}` : ''}
+❔ Masz pytanie? Oznacz mnie we wpisie lub komentarzu na #gielda, a podczas następnej aktualizacji odpowiem na pięć wybranych pytań i zawołam ich autorów ( ͡° ͜ʖ ͡°) 
+
+${Array.isArray(mentionsReplies) && mentionsReplies.length > 0 ? `\n**Odpowiedzi:**\n${mentionsReplies.map(reply => `💬 @${reply.username}: [${reply.post}](${reply.url})\n${reply.reply}`).join('\n\n')}` : ''}
 
 #gielda #wykopindex #krachsmieciuchindex`;
 

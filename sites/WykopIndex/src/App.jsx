@@ -26,7 +26,16 @@ function App() {
             Query.limit(1)
           ]
         );
-        setSentimentData(response.documents);
+        
+        // Parse JSON strings into objects
+        const parsedDocuments = response.documents.map(doc => ({
+          ...doc,
+          mostActiveUsers: doc.mostActiveUsers?.startsWith('[') ? JSON.parse(doc.mostActiveUsers) : [],
+          mostDiscussed: doc.mostDiscussed?.startsWith('[') ? JSON.parse(doc.mostDiscussed) : [],
+          mentionsReplies: doc.mentionsReplies?.startsWith('[') ? JSON.parse(doc.mentionsReplies) : []
+        }));
+        
+        setSentimentData(parsedDocuments);
 
         // Fetch historical data for last 30 days
         try {
@@ -286,32 +295,39 @@ function App() {
                     <p className="text-[#2D2D31] font-medium">{item.summary}</p>
                   </div>
 
-                  {item.mostDiscussed && (
+                  {item.mostDiscussed && item.mostDiscussed.length > 0 && (
                     <div className="mt-6" id="najczesciej-omawiane">
                       <h3 className="text-lg font-bold text-[#FF0000] mb-1">
                         <a href="#najczesciej-omawiane" className="hover:underline">Najczęściej omawiane</a>
                       </h3>
                       <div className="space-y-1">
-                        {(item.mostDiscussed.startsWith('[') ? JSON.parse(item.mostDiscussed) : item.mostDiscussed.split(',')).map((topic, index) => (
-                          <div key={index} className="flex items-center gap-2 text-[#97979B]">
+                        {item.mostDiscussed.map((topic, index) => (
+                          <div key={index} className="flex items-start gap-2">
                             <span className="text-[#2D2D31]">🔥</span>
-                            <span className="text-[#2D2D31] font-medium">{typeof topic === 'string' ? topic.trim() : topic}</span>
+                            <div className="flex-1">
+                              <span className="text-[#2D2D31] font-medium">{topic.asset}</span>
+                              <span className="text-[#2D2D31] font-medium">: {topic.reasoning}</span>
+                            </div>
                           </div>
                         ))}
                       </div>
                     </div>
                   )}
                   
-                  {item.mostActiveUsers && (
+                  {item.mostActiveUsers && item.mostActiveUsers.length > 0 && (
                     <div className="mt-6" id="topowi-analitycy">
                       <h3 className="text-lg font-bold text-[#0047AB] mb-1">
                         <a href="#topowi-analitycy" className="hover:underline">Topowi analitycy</a>
                       </h3>
                       <div className="space-y-1">
-                        {(item.mostActiveUsers.startsWith('[') ? JSON.parse(item.mostActiveUsers) : item.mostActiveUsers.split(',')).map((user, index) => (
-                          <div key={index} className="flex items-center gap-2 text-[#97979B]">
+                        {item.mostActiveUsers.map((user, index) => (
+                          <div key={index} className="flex items-start gap-2">
                             <span className="text-[#2D2D31]">👤</span>
-                            <span className="text-[#2D2D31] font-medium">{typeof user === 'string' ? user.trim() : user}</span>
+                            <div className="flex-1">
+                              <span className="text-[#2D2D31] font-medium">{user.username}</span>
+                              <span className="text-[#2D2D31] font-medium ml-1">({user.sentiment}): </span>
+                              <a href={user.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800 italic">&ldquo;{user.quote}&rdquo;</a>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -350,18 +366,18 @@ function App() {
                     </div>
                   )}
 
-                  {item.mentionsReplies && (
+                  {item.mentionsReplies && item.mentionsReplies.length > 0 && (
                     <div className="mt-6" id="odpowiedzi">
                       <h3 className="text-lg font-bold text-[#008000] mb-1">
                         <a href="#odpowiedzi" className="hover:underline">Odpowiedzi</a>
                       </h3>
                       <div className="space-y-3">
-                        {(item.mentionsReplies.startsWith('[') ? JSON.parse(item.mentionsReplies) : []).map((reply, index) => (
+                        {item.mentionsReplies.map((reply, index) => (
                           <div key={index} className="flex items-start gap-2 p-3 bg-gray-50 rounded">
                             <span className="text-[#2D2D31] mt-0.5">💬</span>
                             <div className="flex-1">
                               <div className="text-sm text-[#97979B] mb-1">
-                                {reply.username}: <a href={reply.url} target="_blank" rel="noopener noreferrer" className="hover:underline">{reply.post}</a>
+                                {reply.username}: <a href={reply.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">{reply.post}</a>
                               </div>
                               <div className="text-[#2D2D31] font-medium text-sm">
                                 {reply.reply}
