@@ -12,9 +12,15 @@ export default async ({ req, res, log, error }) => {
     const databases = new sdk.Databases(client);
 
     // Initialize Gemini AI
-    const ai = new GoogleGenAI({
+    const primaryAi = new GoogleGenAI({
       apiKey: process.env.GEMINI_API_KEY,
     });
+    
+    const backupAi = new GoogleGenAI({
+      apiKey: process.env.GEMINI_BACKUP_API_KEY,
+    });
+
+    let ai = primaryAi;
 
     let model = 'gemini-2.5-flash';
     const systemInstruction = `You are a helpful assistant that analyzes sentiment about stock markets on a Polish social media platform.
@@ -37,13 +43,13 @@ export default async ({ req, res, log, error }) => {
     };
 
     // Retry helper with exponential backoff
-    const retryWithBackoff = async (fn, maxAttempts = 3, delayMs = 30000) => {
+    const retryWithBackoff = async (fn, maxAttempts = 4, delayMs = 30000) => {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          // Change model to gemini-2.5-flash-lite on 3rd attempt
+          // Switch to backup AI on third attempt to mitigate rate limits
           if (attempt === 3) {
-            model = 'gemini-2.5-flash-lite';
-            log('Switching to gemini-2.5-flash-lite for final attempt');
+            ai = backupAi;
+            log('Switching to backup AI');
           }
           return await fn();
         } catch (err) {
@@ -202,7 +208,7 @@ export default async ({ req, res, log, error }) => {
     if (parsedNotifications.length === 0) {
       mentionsResult = [];
     } else {
-      const mentionsPrompt = `Jestes kontem KrachSmieciuchIndex na wykop.pl. Udziel krotkich odpowiedzi na wpisy/komentarze, w ktorych zostales oznaczony. Odpowiadaj tylko na pytania.
+      const mentionsPrompt = `Jestes kontem KrachSmieciuchIndex na wykop.pl. Udziel krotkich odpowiedzi na wpisy/komentarze, w ktorych zostales oznaczony. Odpowiadaj tylko na pytania zwiazane z gielda, inwestowaniem, rynkami finansowymi lub ekonomia.
       Analizuj tylko tekst z pola questionToAnswer. Udziel konkretnej odpowiedzi na zadane pytanie lub poruszony temat. Uwzglednij kontekst z calego wpisu (pole post) oraz komentarzy (pole comments), aby dostarczyc precyzyjna i trafna odpowiedz.
       Dlugosc odpowiedzi na kazde z pytan (pole "reply") nie moze przekroczyc 800 znakow.
       
