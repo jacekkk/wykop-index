@@ -137,7 +137,6 @@ export default async ({ req, res, log, error }) => {
 
     // Fetch full discussion for each unique entry
     const uniqueEntryIds = [...new Set(filteredNotifications.map(n => n.entry.id))];
-    log(`Fetching full discussions for ${uniqueEntryIds.length} entries...`);
     
     const commentsResponses = await Promise.all(
       uniqueEntryIds.map(entryId =>
@@ -306,7 +305,7 @@ export default async ({ req, res, log, error }) => {
           }
 
           const postResult = await postResponse.json();
-          log(`Successfully posted to Wykop: ${postResult.data.id}`);
+          log(`Successfully posted to Wykop, entry ID: ${postResult.data.id}`);
 
           
           try {
@@ -336,7 +335,6 @@ export default async ({ req, res, log, error }) => {
     if (notificationIds.length > 0) {
       log(`Marking ${notificationIds.length} notifications as read...`);
       notificationIds.forEach(notificationId => {
-        log(`Marking notification ID as read: ${notificationId}`);
         fetch(`https://wykop.pl/api/v3/notifications/entries/${notificationId}`, {
           method: 'PUT',
           headers: {
@@ -344,6 +342,8 @@ export default async ({ req, res, log, error }) => {
             'Authorization': `Bearer ${wykopToken}`
           }
         });
+
+        log(`Marked notification ID as read: ${notificationId}`);
       });
     };
 
