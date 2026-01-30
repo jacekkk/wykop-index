@@ -11,6 +11,8 @@ function App() {
   const [yesterdaySentiment, setYesterdaySentiment] = useState(null);
   const [weekAgoSentiment, setWeekAgoSentiment] = useState(null);
   const [historicalData, setHistoricalData] = useState([]);
+  const [replies, setReplies] = useState([]);
+  const [loadingReplies, setLoadingReplies] = useState(true);
 
   // Fetch sentiment data and latest image from Appwrite
   useEffect(() => {
@@ -133,7 +135,27 @@ function App() {
       }
     }
     
+    async function fetchReplies() {
+      setLoadingReplies(true);
+      try {
+        const response = await databases.listDocuments(
+          '69617178003ac8ef4fba', // Database ID
+          'replies', // Table ID
+          [
+            Query.orderDesc('$createdAt'),
+            Query.limit(5)
+          ]
+        );
+        setReplies(response.documents);
+      } catch (err) {
+        console.error('Error fetching replies:', err);
+      } finally {
+        setLoadingReplies(false);
+      }
+    }
+    
     fetchData();
+    fetchReplies();
   }, []);
 
   // Scroll to hash anchor after data loads
@@ -366,18 +388,69 @@ function App() {
                     </div>
                   )}
 
-                  {item.mentionsReplies && item.mentionsReplies.length > 0 && (
+                  {historicalData.length > 0 && (
+                    <div className="mt-6" id="ostatnie-30-dni">
+                      <h3 className="text-lg font-bold text-[#2D2D31] mb-1">
+                        <a href="#ostatnie-30-dni" className="hover:underline">Ostatnie 30 dni</a>
+                      </h3>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <LineChart data={historicalData} margin={{ top: 5, right: 5, left: -30, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#EDEDF0" />
+                          <XAxis 
+                            dataKey="date" 
+                            stroke="#2D2D31"
+                            style={{ fontSize: '12px' }}
+                            angle={-45}
+                            textAnchor="end"
+                            height={60}
+                            interval="preserveStartEnd"
+                          />
+                          <YAxis 
+                            domain={[0, 100]}
+                            stroke="#2D2D31"
+                            style={{ fontSize: '12px' }}
+                          />
+                          <Tooltip 
+                            contentStyle={{ 
+                              backgroundColor: 'white', 
+                              border: '1px solid #EDEDF0',
+                              borderRadius: '4px'
+                            }}
+                          />
+                          <Legend />
+                          <Line 
+                            type="monotone" 
+                            dataKey="sentiment" 
+                            stroke="#0047AB" 
+                            strokeWidth={2}
+                            name="Krach & Śmieciuch Index"
+                            dot={{ fill: '#0047AB', r: 3 }}
+                          />
+                          <Line 
+                            type="monotone" 
+                            dataKey="tomekSentiment" 
+                            stroke="#808080" 
+                            strokeWidth={2}
+                            name="TomekIndicator®"
+                            dot={{ fill: '#808080', r: 3 }}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+
+                  {!loadingReplies && replies.length > 0 && (
                     <div className="mt-6" id="odpowiedzi">
                       <h3 className="text-lg font-bold text-[#008000] mb-1">
                         <a href="#odpowiedzi" className="hover:underline">Odpowiedzi</a>
                       </h3>
                       <div className="space-y-3">
-                        {item.mentionsReplies.map((reply, index) => (
-                          <div key={index} className="flex items-start gap-2 p-3 bg-gray-50 rounded">
+                        {replies.map((reply) => (
+                          <div key={reply.$id} className="flex items-start gap-2 p-3 bg-gray-50 rounded">
                             <span className="text-[#2D2D31] mt-0.5">💬</span>
                             <div className="flex-1">
                               <div className="text-sm text-[#97979B] mb-1">
-                                {reply.username}: <a href={reply.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">{reply.post}</a>
+                                {reply.username}: <a href={reply.postUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">{reply.question}</a>
                               </div>
                               <div className="text-[#2D2D31] font-medium text-sm">
                                 {reply.reply}
@@ -389,54 +462,6 @@ function App() {
                     </div>
                   )}
                 </div>
-                {/* Historical Chart */}
-                {historicalData.length > 0 && (
-                  <div className="mt-6" id="ostatnie-30-dni">
-                    <h3 className="text-lg font-bold text-[#2D2D31] mb-1">
-                      <a href="#ostatnie-30-dni" className="hover:underline">Ostatnie 30 dni</a>
-                    </h3>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <LineChart data={historicalData} margin={{ top: 5, right: 5, left: -30, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#EDEDF0" />
-                        <XAxis 
-                          dataKey="date" 
-                          stroke="#2D2D31"
-                          style={{ fontSize: '12px' }}
-                          interval="preserveStartEnd"
-                        />
-                        <YAxis 
-                          domain={[0, 100]}
-                          stroke="#2D2D31"
-                          style={{ fontSize: '12px' }}
-                        />
-                        <Tooltip 
-                          contentStyle={{ 
-                            backgroundColor: 'white', 
-                            border: '1px solid #EDEDF0',
-                            borderRadius: '4px'
-                          }}
-                        />
-                        <Legend />
-                        <Line 
-                          type="monotone" 
-                          dataKey="sentiment" 
-                          stroke="#0047AB" 
-                          strokeWidth={2}
-                          name="Krach & Śmieciuch Index"
-                          dot={{ fill: '#0047AB', r: 3 }}
-                        />
-                        <Line 
-                          type="monotone" 
-                          dataKey="tomekSentiment" 
-                          stroke="#808080" 
-                          strokeWidth={2}
-                          name="TomekIndicator®"
-                          dot={{ fill: '#808080', r: 3 }}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
                 </div>
               </div>
             ))}

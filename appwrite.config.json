@@ -53,7 +53,7 @@
                 "files.write"
             ],
             "events": [],
-            "schedule": "0 8,18 * * *",
+            "schedule": "0 8,13,18,23 * * *",
             "timeout": 300,
             "entrypoint": "src/main.js",
             "commands": "npm install",
@@ -68,10 +68,10 @@
             "logging": true,
             "runtime": "node-22",
             "scopes": [
-                "documents.read"
+                "documents.write"
             ],
             "events": [],
-            "schedule": "15 8,18 * * *",
+            "schedule": "*/5 * * * *",
             "timeout": 300,
             "entrypoint": "src/main.js",
             "commands": "npm install",
@@ -123,6 +123,15 @@
                     "default": null
                 },
                 {
+                    "key": "tomekSentiment",
+                    "type": "integer",
+                    "required": true,
+                    "array": false,
+                    "min": 1,
+                    "max": 100,
+                    "default": null
+                },
+                {
                     "key": "summary",
                     "type": "string",
                     "required": true,
@@ -150,15 +159,6 @@
                     "encrypt": false
                 },
                 {
-                    "key": "tomekSentiment",
-                    "type": "integer",
-                    "required": true,
-                    "array": false,
-                    "min": 1,
-                    "max": 100,
-                    "default": null
-                },
-                {
                     "key": "tomekSummary",
                     "type": "string",
                     "required": false,
@@ -175,13 +175,53 @@
                     "size": 255,
                     "default": null,
                     "encrypt": false
+                }
+            ],
+            "indexes": []
+        },
+        {
+            "$id": "replies",
+            "$permissions": [
+                "read(\"any\")"
+            ],
+            "databaseId": "69617178003ac8ef4fba",
+            "name": "replies",
+            "enabled": true,
+            "rowSecurity": false,
+            "columns": [
+                {
+                    "key": "postUrl",
+                    "type": "string",
+                    "required": true,
+                    "array": false,
+                    "size": 100,
+                    "default": null,
+                    "encrypt": false
                 },
                 {
-                    "key": "mentionsReplies",
+                    "key": "question",
                     "type": "string",
-                    "required": false,
+                    "required": true,
                     "array": false,
-                    "size": 5000,
+                    "size": 1000,
+                    "default": null,
+                    "encrypt": false
+                },
+                {
+                    "key": "reply",
+                    "type": "string",
+                    "required": true,
+                    "array": false,
+                    "size": 1000,
+                    "default": null,
+                    "encrypt": false
+                },
+                {
+                    "key": "username",
+                    "type": "string",
+                    "required": true,
+                    "array": false,
+                    "size": 100,
                     "default": null,
                     "encrypt": false
                 }
