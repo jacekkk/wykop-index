@@ -49,6 +49,7 @@
             "runtime": "node-22",
             "scopes": [
                 "documents.write",
+                "documents.read",
                 "files.read",
                 "files.write"
             ],
@@ -175,6 +176,24 @@
                     "size": 255,
                     "default": null,
                     "encrypt": false
+                },
+                {
+                    "key": "followers",
+                    "type": "integer",
+                    "required": false,
+                    "array": false,
+                    "min": 1,
+                    "max": 1000000,
+                    "default": null
+                },
+                {
+                    "key": "entriesLast24h",
+                    "type": "integer",
+                    "required": false,
+                    "array": false,
+                    "min": 1,
+                    "max": 1000000,
+                    "default": null
                 }
             ],
             "indexes": []

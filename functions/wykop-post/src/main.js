@@ -23,9 +23,15 @@ export default async ({ req, res, log, error }) => {
     let ai = primaryAi;
 
     let model = 'gemini-2.5-flash';
-    const systemInstruction = `You are a helpful assistant that analyzes sentiment about stock markets on a Polish social media platform.
-    The username of an account from which your responses are posted is KrachSmieciuchIndex.
-    CRITICAL: You MUST respond with ONLY raw JSON. DO NOT wrap your response in markdown code blocks. DO NOT add any text before or after the JSON. Your entire response must be valid JSON that can be directly parsed.`;
+    const systemInstruction = `You are KrachSmieciuchIndex, a helpful assistant that responds to questions about stock markets, investing, and economics on Wykop, a Polish social media platform.
+    
+    BEHAVIORAL RULES:
+    - Use a mildly ironic and sarcastic tone characteristic of Wykop.
+    - Provide specific, concrete answers - avoid generalities and platitudes.
+    - Keep each reply under 800 characters.
+    
+    CRITICAL: You MUST respond with ONLY raw JSON. DO NOT wrap your response in markdown code blocks. DO NOT add any text before or after the JSON. Your entire response must be valid JSON that can be directly parsed.
+    `;
 
     // Helper function to clean markdown code blocks from JSON responses
     const cleanJsonResponse = (text) => {
@@ -63,9 +69,11 @@ export default async ({ req, res, log, error }) => {
       }
     };
 
-    const nowPoland = new Date().toLocaleString('en-US', { timeZone: 'Europe/Warsaw' });
-    const currentTime = new Date(nowPoland);
-    const oneHourAgo = new Date(currentTime.getTime() - 60 * 60 * 1000);
+    // Get current UTC time and calculate Poland offset (UTC+1 or UTC+2 depending on DST)
+    const nowUTC = new Date();
+    const nowPolandStr = nowUTC.toLocaleString('en-US', { timeZone: 'Europe/Warsaw' });
+    const polandOffset = new Date(nowPolandStr).getTime() - nowUTC.getTime();
+    const oneHourAgo = new Date(nowUTC.getTime() - 60 * 60 * 1000);
 
     // Helper function to parse comments
     const parseComment = (comment, entryId) => ({
@@ -132,8 +140,10 @@ export default async ({ req, res, log, error }) => {
     log(`Fetched ${allNotifications.length} notifications from Wykop. Filtering...`);
 
     const filteredNotifications = allNotifications.filter(notification => {
-      const notificationDate = new Date(notification.created_at.replace(' ', 'T'));
-      if (notificationDate < oneHourAgo) return false;
+      // Wykop API returns Poland time, parse as UTC then subtract Poland offset
+      const notificationDate = new Date(notification.created_at.replace(' ', 'T') + 'Z');
+      const notificationTimeUTC = notificationDate.getTime() - polandOffset;
+      if (notificationTimeUTC < oneHourAgo.getTime()) return false;
       if (notification.type !== 'new_comment_in_entry' && notification.type !== 'new_entry') return false;
       if (notification.read > 0) return false;
       // if (notification.entry?.author?.username === 'KrachSmieciuchIndex') return false;
@@ -199,7 +209,9 @@ export default async ({ req, res, log, error }) => {
       };
     });
 
-    log(`Got ${parsedNotifications.length} unread notifications from the last 1 hour: ${JSON.stringify(parsedNotifications)}`);
+    log(`Got ${parsedNotifications.length} unread notifications from the last hour: ${JSON.stringify(parsedNotifications.map(n => 
+      ({ entryUrl: n.post.url, questionToAnswer: n.questionToAnswer })
+    ))}`);
 
     // --- GENERATE MENTIONS RESPONSES SECTION ---
 
@@ -208,9 +220,9 @@ export default async ({ req, res, log, error }) => {
     if (parsedNotifications.length === 0) {
       mentionsResult = [];
     } else {
-      const mentionsPrompt = `Jestes kontem KrachSmieciuchIndex na wykop.pl. Udziel krotkich odpowiedzi na wpisy/komentarze, w ktorych zostales oznaczony. Odpowiadaj tylko na pytania zwiazane z gielda, inwestowaniem, rynkami finansowymi lub ekonomia.
-      Analizuj tylko tekst z pola questionToAnswer. Udziel konkretnej odpowiedzi na zadane pytanie lub poruszony temat. Uwzglednij kontekst z calego wpisu (pole post) oraz komentarzy (pole comments), aby dostarczyc precyzyjna i trafna odpowiedz.
-      Dlugosc odpowiedzi na kazde z pytan (pole "reply") nie moze przekroczyc 800 znakow.
+      const mentionsPrompt = `Udziel odpowiedzi na wpisy/komentarze, w ktorych zostales oznaczony. Odpowiadaj szczerze i konkretnie, bazujac na danych i faktach, ale jezeli wpis jest ironiczny lub sarkastyczny, odpowiedz w podobnym tonie.
+      Odpowiadaj tylko na tekst z pola questionToAnswer, ale uwzglednij kontekst z calego wpisu (pole post) oraz komentarzy (pole comments), aby dostarczyc precyzyjna odpowiedz.
+      Jezeli wpis lub komentarz zawiera zalacznik (pole photo_url lub embed_url), otworz go i uwzglednij jego tresc w swojej odpowiedzi.
       
       Odpowiedz w nastepujacym formacie JSON (flat array):
       [
@@ -220,9 +232,11 @@ export default async ({ req, res, log, error }) => {
       
       WAZNE:
       - Pole "id" MUSI byc rowne wartosci "post.id" z danych wejsciowych (np. jesli post.id to 12345, to id w odpowiedzi to 12345).
+      - Odpowiadaj TYLKO na tekst z pola questionToAnswer, ale uzyj pola post i comments dla kontekstu.
+      - Dlugosc odpowiedzi na kazde z pytan (pole "reply") nie moze przekroczyc 800 znakow.
+      - Upewnij sie, ze pole username to uzytkownik, ktory faktycznie napisal dany cytat, a nie inny uzytkownik, ktory skomentowal ten sam wpis.
       - Wszystkie pola (id, username, url, post, reply) sa wymagane w kazdym obiekcie.
       - Jezeli nie ma pytan do odpowiedzi, zwroc pusta tablice [].
-      - Odpowiadaj TYLKO na tekst z pola questionToAnswer, ale uzyj pola post i comments dla kontekstu.
       
       Wpisy: ${JSON.stringify(parsedNotifications)}`;
 
@@ -286,7 +300,7 @@ export default async ({ req, res, log, error }) => {
 
     for (const replyObj of mentionsResult) {
       try {
-        log(`Posting a reply to ${replyObj.url}`);
+        log(`Posting a reply to "${replyObj.post}":\n"${replyObj.reply}"`);
 
           const postContent = `@${replyObj.username} ${replyObj.reply}`;
 

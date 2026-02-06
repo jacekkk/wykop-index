@@ -41,15 +41,15 @@ function App() {
 
         // Fetch historical data for last 30 days
         try {
-          const thirtyDaysAgo = new Date();
-          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+          const now = new Date();
+          const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
           const historicalResponse = await databases.listDocuments(
             '69617178003ac8ef4fba',
             'sentiment',
             [
               Query.greaterThan('$createdAt', thirtyDaysAgo.toISOString()),
               Query.orderAsc('$createdAt'),
-              Query.limit(100)
+              Query.limit(150)
             ]
           );
           
@@ -90,9 +90,9 @@ function App() {
           setHistoricalData(averagedData);
 
           // Extract yesterday's sentiment from averaged data
-          const yesterday = new Date();
-          yesterday.setDate(yesterday.getDate() - 1);
-          const yesterdayFormatted = yesterday.toLocaleDateString('pl-PL', {
+          const nowUTC = new Date();
+          const yesterdayUTC = new Date(nowUTC.getTime() - 24 * 60 * 60 * 1000);
+          const yesterdayFormatted = yesterdayUTC.toLocaleDateString('pl-PL', {
             day: '2-digit',
             month: '2-digit',
             timeZone: 'Europe/Warsaw'
@@ -103,9 +103,8 @@ function App() {
           }
 
           // Extract week ago sentiment from averaged data
-          const weekAgo = new Date();
-          weekAgo.setDate(weekAgo.getDate() - 7);
-          const weekAgoFormatted = weekAgo.toLocaleDateString('pl-PL', {
+          const weekAgoUTC = new Date(nowUTC.getTime() - 7 * 24 * 60 * 60 * 1000);
+          const weekAgoFormatted = weekAgoUTC.toLocaleDateString('pl-PL', {
             day: '2-digit',
             month: '2-digit',
             timeZone: 'Europe/Warsaw'
@@ -269,12 +268,6 @@ function App() {
                         >
                           {yesterdaySentiment}
                         </span>
-                        {item.sentiment > yesterdaySentiment && (
-                          <span className="text-green-600">↑ {item.sentiment - yesterdaySentiment}</span>
-                        )}
-                        {item.sentiment < yesterdaySentiment && (
-                          <span className="text-red-600">↓ {yesterdaySentiment - item.sentiment}</span>
-                        )}
                       </>
                     ) : (
                       <span className="text-[#97979B]">-</span>
@@ -296,12 +289,6 @@ function App() {
                         >
                           {weekAgoSentiment}
                         </span>
-                        {item.sentiment > weekAgoSentiment && (
-                          <span className="text-green-600">↑ {item.sentiment - weekAgoSentiment}</span>
-                        )}
-                        {item.sentiment < weekAgoSentiment && (
-                          <span className="text-red-600">↓ {weekAgoSentiment - item.sentiment}</span>
-                        )}
                       </>
                     ) : (
                       <span className="text-[#97979B]">-</span>

@@ -117,64 +117,155 @@ export default async ({ req, res, log, error }) => {
     let wykopToken = wykopAuthResponseJson.data.token;
     log("Successfully authenticated with Wykop using API key");
 
-    const nowPoland = new Date().toLocaleString('en-US', { timeZone: 'Europe/Warsaw' });
-    const currentTime = new Date(nowPoland);
+    // Get current UTC time and calculate Poland offset (UTC+1 or UTC+2 depending on DST)
+    const nowUTC = new Date();
+    const nowPolandStr = nowUTC.toLocaleString('en-US', { timeZone: 'Europe/Warsaw' });
+    const polandOffset = new Date(nowPolandStr).getTime() - nowUTC.getTime();
     
+    // For Wykop API operations, we work with Poland time since API returns Poland timestamps
     const hoursToLookBack = 5.5; // 5 hours + 30 min buffer for any delays
-    const lookBackTime = new Date(currentTime.getTime() - hoursToLookBack * 60 * 60 * 1000);
-    
-    log(`Analyzing posts from ${lookBackTime.toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw' })} to ${currentTime.toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw' })} (Polish time)`);
-    
-    const twentyFourHoursAgo = new Date(currentTime.getTime() - 24 * 60 * 60 * 1000);
+    const lookBackTime = new Date(nowUTC.getTime() - hoursToLookBack * 60 * 60 * 1000);
+    const twentyFourHoursAgo = new Date(nowUTC.getTime() - 24 * 60 * 60 * 1000);
 
-    // --- FETCH WYKOP DATA SECTION ---
-
-    const [wykopWpisyResponse1, wykopWpisyResponse2, wykopWpisyResponse3, wykopWpisyResponse4] = await Promise.all([
-      fetch('https://wykop.pl/api/v3/tags/gielda/stream?page=1&limit=50&sort=all&type=all&multimedia=false', {
+    // --- TAG STATS SECTION ---
+    const tagResponse = await fetch('https://wykop.pl/api/v3/tags/gielda', {
         method: 'GET',
         headers: {
           'accept': 'application/json',
           'Authorization': `Bearer ${wykopToken}`
         }
-      }),
-      fetch('https://wykop.pl/api/v3/tags/gielda/stream?page=2&limit=50&sort=all&type=all&multimedia=false', {
-        method: 'GET',
-        headers: {
-          'accept': 'application/json',
-          'Authorization': `Bearer ${wykopToken}`
-        }
-      }),
-      fetch('https://wykop.pl/api/v3/tags/gielda/stream?page=3&limit=50&sort=all&type=all&multimedia=false', {
-        method: 'GET',
-        headers: {
-          'accept': 'application/json',
-          'Authorization': `Bearer ${wykopToken}`
-        }
-      }),
-      fetch('https://wykop.pl/api/v3/tags/gielda/stream?page=4&limit=50&sort=all&type=all&multimedia=false', {
-        method: 'GET',
-        headers: {
-          'accept': 'application/json',
-          'Authorization': `Bearer ${wykopToken}`
-        }
-      }),
-    ]);
+      });
 
-    const [wykopWpisyResponseJson1, wykopWpisyResponseJson2, wykopWpisyResponseJson3, wykopWpisyResponseJson4] = await Promise.all([
-      wykopWpisyResponse1.json(),
-      wykopWpisyResponse2.json(),
-      wykopWpisyResponse3.json(),
-      wykopWpisyResponse4.json()
-    ]);
+    if (!tagResponse.ok) {
+      throw new Error(`Wykop tag stats fetch failed: ${tagResponse.status} ${await tagResponse.text()}`);
+    }
 
-    const allData = [...wykopWpisyResponseJson1.data, ...wykopWpisyResponseJson2.data, ...wykopWpisyResponseJson3.data, ...wykopWpisyResponseJson4.data];
-    const recentData = allData.filter(entry => {
-      // created_at format: "2026-01-16 11:27:44"
-      const entryDate = new Date(entry.created_at.replace(' ', 'T'));
-      return entryDate >= lookBackTime && entryDate <= currentTime;
-    });
+    const tagResponseJson = await tagResponse.json();
+    const followersCount = tagResponseJson.data.followers;
 
-    log(`Got ${recentData.length} posts from the time window.`);
+    log('Starting to count posts from the last 24 hours...');
+    let batchSize = 5; // Fetch 5 pages at once
+    let entriesLast24h = 0;
+    let currentBatchStart = 1;
+    let shouldContinue = true;
+    let newestEntryTime = null;
+    let oldestEntryTime = null;
+
+    while (shouldContinue) {
+      const pageNumbers = Array.from({ length: batchSize }, (_, i) => currentBatchStart + i);
+      log(`Fetching pages ${pageNumbers[0]}-${pageNumbers[pageNumbers.length - 1]}`);
+
+      const responses = await Promise.all(
+        pageNumbers.map(page => 
+          fetch(`https://wykop.pl/api/v3/tags/gielda/stream?page=${page}&limit=50&sort=all&type=all&multimedia=false`, {
+            method: 'GET',
+            headers: {
+              'accept': 'application/json',
+              'Authorization': `Bearer ${wykopToken}`
+            }
+          })
+        )
+      );
+
+      const pagesData = await Promise.all(responses.map(r => r.json()));
+
+      for (let i = 0; i < pagesData.length; i++) {
+        const entries = pagesData[i].data;
+        if (!entries || entries.length === 0) {
+          shouldContinue = false;
+          break;
+        }
+
+        let recentCount = 0;
+        for (const entry of entries) {
+          // Wykop API returns Poland time, parse as UTC then subtract Poland offset
+          const entryDate = new Date(entry.created_at.replace(' ', 'T') + 'Z');
+          if (entryDate.getTime() - polandOffset >= twentyFourHoursAgo.getTime()) {
+            recentCount++;
+            if (!newestEntryTime) newestEntryTime = entry.created_at;
+            oldestEntryTime = entry.created_at;
+          } else {
+            entriesLast24h += recentCount;
+            shouldContinue = false;
+            break;
+          }
+        }
+
+        if (!shouldContinue) break;
+        entriesLast24h += recentCount;
+      }
+      currentBatchStart += batchSize;
+    }
+
+    // Helper to format timestamps as UTC strings
+    const formatDateTime = (date) => {
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(date.getUTCDate()).padStart(2, '0');
+      const hours = String(date.getUTCHours()).padStart(2, '0');
+      const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+      const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} UTC`;
+    };
+
+    // Log times of entries from the last 24h in UTC and Poland time
+    if (newestEntryTime && oldestEntryTime) {
+      const newestEntryUTC = formatDateTime(new Date(new Date(newestEntryTime.replace(' ', 'T') + 'Z').getTime() - polandOffset));
+      const oldestEntryUTC = formatDateTime(new Date(new Date(oldestEntryTime.replace(' ', 'T') + 'Z').getTime() - polandOffset));
+      log(`Got ${entriesLast24h} posts from the last 24h between ${oldestEntryUTC} - ${newestEntryUTC} (Polish time: ${oldestEntryTime} - ${newestEntryTime})`);
+    } else {
+      log(`Got ${entriesLast24h} posts from the last 24h`);
+    }
+
+    // --- SENTIMENT ANALYSIS SECTION ---
+
+    batchSize = 5; // Fetch 5 pages at once for sentiment analysis
+    currentBatchStart = 1;
+    shouldContinue = true;
+    let recentEntries = [];
+
+    while (shouldContinue) {
+      const pageNumbers = Array.from({ length: batchSize }, (_, i) => currentBatchStart + i);
+      log(`Fetching pages ${pageNumbers[0]}-${pageNumbers[pageNumbers.length - 1]} for sentiment analysis`);
+
+      const responses = await Promise.all(
+        pageNumbers.map(page =>
+          fetch(`https://wykop.pl/api/v3/tags/gielda/stream?page=${page}&limit=50&sort=all&type=all&multimedia=false`, {
+            method: 'GET',
+            headers: {
+              'accept': 'application/json',
+              'Authorization': `Bearer ${wykopToken}`
+            }
+          })
+        )
+      );
+
+      const pagesData = await Promise.all(responses.map(r => r.json()));
+
+      for (let i = 0; i < pagesData.length; i++) {
+        const entries = pagesData[i].data;
+        if (!entries || entries.length === 0) {
+          shouldContinue = false;
+          break;
+        }
+
+        for (const entry of entries) {
+          // Wykop API returns Poland time, parse as UTC then subtract Poland offset
+          const entryDate = new Date(entry.created_at.replace(' ', 'T') + 'Z');
+          const entryTimeUTC = entryDate.getTime() - polandOffset;
+          if (entryTimeUTC >= lookBackTime.getTime()) {
+            recentEntries.push(entry);
+          } else if (entryTimeUTC < lookBackTime.getTime()) {
+            // Found an entry older than lookback time, stop
+            shouldContinue = false;
+            break;
+          }
+        }
+
+        if (!shouldContinue) break;
+      }
+      currentBatchStart += batchSize;
+    }
 
     const parseComment = (comment, entryId) => ({
       id: comment.id,
@@ -199,9 +290,18 @@ export default async ({ req, res, log, error }) => {
       embed_url: entry.media?.embed?.url || null
     }));
 
-    const parsedData = parsePosts(recentData);
+    const parsedData = parsePosts(recentEntries);
 
-    log(`Generating sentiment for ${parsedData.length} posts between hours: ${parsedData[parsedData.length -1].created_at} - ${parsedData[0].created_at}.`);
+    // Log times of entries for sentiment analysis in UTC and Poland time
+    if (parsedData.length > 0) {
+      const oldestEntryTime = parsedData[parsedData.length - 1].created_at;
+      const newestEntryTime = parsedData[0].created_at;
+      const oldestParsedUTC = formatDateTime(new Date(new Date(oldestEntryTime.replace(' ', 'T') + 'Z').getTime() - polandOffset));
+      const newestParsedUTC = formatDateTime(new Date(new Date(newestEntryTime.replace(' ', 'T') + 'Z').getTime() - polandOffset));
+      log(`Got ${parsedData.length} posts between ${oldestParsedUTC} - ${newestParsedUTC} (Polish time: ${oldestEntryTime} - ${newestEntryTime})`);
+    } else {
+      log('No posts to analyze');
+    }
 
     const prompt = `Przeanalizuj najnowsze wpisy z tagu #gielda na portalu wykop.pl i oszacuj obecny sentyment uzytkownikow w skali 1-100,
     gdzie 1 to ekstremalnie bearish, a 100 to ekstremalnie bullish. Uzyj cytatow jako uzasadnienia.
@@ -224,8 +324,8 @@ export default async ({ req, res, log, error }) => {
     
     WAZNE:
     - mostDiscussed: trzy najczesciej omawiane spolki lub aktywa.
-    - topQuotes: top 3 krotkich cytatow z najczesciej plusowanych wpisow uzytkownikow.
-    - Wszystkie pola sa wymagane.
+    - topQuotes: top 3 krotkich cytatow z najczesciej plusowanych wpisow uzytkownikow. UWAGA: Upewnij sie, ze pole username to uzytkownik, ktory faktycznie napisal dany cytat, a nie inny uzytkownik, ktory skomentowal ten sam wpis.
+    - Wszystkie pola w odpowiedzi sa wymagane.
     
     Wpisy: ${JSON.stringify(parsedData)}`;
 
@@ -302,18 +402,27 @@ export default async ({ req, res, log, error }) => {
 
     const allTomekData = [...tomekJson1.data, ...tomekJson2.data];
     const recentTomekData = allTomekData.filter(entry => {
-      const entryDate = new Date(entry.created_at.replace(' ', 'T'));
-      return entryDate >= twentyFourHoursAgo;
+      // Wykop API returns Poland time, parse as UTC then subtract Poland offset
+      const entryDate = new Date(entry.created_at.replace(' ', 'T') + 'Z');
+      return entryDate.getTime() - polandOffset >= twentyFourHoursAgo.getTime();
     });
 
-    log(`Got ${recentTomekData.length} Tomek posts between hours: ${recentTomekData[recentTomekData.length -1].created_at} - ${recentTomekData[0].created_at}.`);
+    // Log times of Tomek entries in UTC and Poland time
+    if (recentTomekData.length > 0) {
+      const newestTomekTime = recentTomekData[0].created_at;
+      const oldestTomekTime = recentTomekData[recentTomekData.length - 1].created_at;
+      const newestTomekUTC = formatDateTime(new Date(new Date(newestTomekTime.replace(' ', 'T') + 'Z').getTime() - polandOffset));
+      const oldestTomekUTC = formatDateTime(new Date(new Date(oldestTomekTime.replace(' ', 'T') + 'Z').getTime() - polandOffset));
+      log(`Got ${recentTomekData.length} Tomek posts between ${oldestTomekUTC} - ${newestTomekUTC} (Polish time: ${oldestTomekTime} - ${newestTomekTime})`);
+    } else {
+      log('No Tomek posts from the last 24h with #gielda tag');
+    }
 
     const parsedTomekData = parsePosts(recentTomekData);
 
     let tomekSentimentResult;
 
     if (parsedTomekData.length === 0) {
-      log("No Tomek posts found in the last 24 hours with #gielda tag.");
       tomekSentimentResult = {
         sentiment: "0",
         summary: "Tomek od wczoraj siedzi cicho - albo mamy pompę stulecia i siedzi w norze, albo krach stulecia i siedzi na Bahamach za hajs ze 100-letnich obligacji."
@@ -329,7 +438,8 @@ export default async ({ req, res, log, error }) => {
       }
       
       WAZNE:
-      - Wszystkie pola sa wymagane.
+      - Jezeli wpis lub komentarz zawiera zalacznik (pole photo_url lub embed_url) to uwzglednij tresc zalacznika jako czesc wpisu do analizy sentymentu Tomka.
+      - Wszystkie pola w odpowiedzi sa wymagane.
       
       Wpisy: ${JSON.stringify(parsedTomekData)}`;
 
@@ -448,7 +558,9 @@ export default async ({ req, res, log, error }) => {
           mostDiscussed: sentimentResult.mostDiscussed,
           tomekSentiment: parseInt(tomekSentimentResult.sentiment),
           tomekSummary: tomekSentimentResult.summary,
-          imageId: imageId
+          imageId: imageId,
+          followers: followersCount,
+          entriesLast24h: entriesLast24h
         }
     );
 
@@ -457,6 +569,50 @@ export default async ({ req, res, log, error }) => {
     // --- POST TO WYKOP SECTION ---
     
     try {
+      // Fetch historical sentiment data from the last 30 days (after saving, so we can exclude the new entry)
+      const now = new Date();
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+      const lastThirtyDaysData = await databases.listDocuments(
+        '69617178003ac8ef4fba',
+        'sentiment',
+        [
+          sdk.Query.greaterThan('$createdAt', thirtyDaysAgo.toISOString()),
+          sdk.Query.orderAsc('$createdAt'),
+          sdk.Query.limit(150)
+        ]
+      );
+
+      // Use UTC for date boundaries since database stores timestamps in UTC
+      const startOfTodayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+      const startOfYesterdayUTC = new Date(startOfTodayUTC.getTime() - 24 * 60 * 60 * 1000);
+      
+      // Get yesterday's sentiment and entry count
+      const yesterdayEntries = lastThirtyDaysData.documents.filter(doc => {
+        if (doc.$id === dbResult.$id) return false; // Exclude the just-saved entry to guard against edge cases due to timing
+        const docDate = new Date(doc.$createdAt);
+        return docDate >= startOfYesterdayUTC && docDate < startOfTodayUTC;
+      });
+
+      log(`Yesterday entries: ${JSON.stringify(yesterdayEntries.map(e => 
+        ({ id: e.$id, createdAt: e.$createdAt, sentiment: e.sentiment, entriesLast24h: e.entriesLast24h, followers: e.followers })
+      ))}`);
+
+      const totalSentiment = yesterdayEntries.reduce((sum, doc) => sum + doc.sentiment, 0);
+      const yesterdaySentiment = yesterdayEntries.length > 0 ? Math.round(totalSentiment / yesterdayEntries.length) : null;
+      const yesterdayEntryCount = yesterdayEntries.length > 0 ? yesterdayEntries[yesterdayEntries.length - 1].entriesLast24h : null;
+      log(`Yesterday's average sentiment: ${yesterdaySentiment} (from ${yesterdayEntries.length} entries)`);
+
+      // Get followers from a week ago
+      const startOfWeekAgoUTC = new Date(startOfTodayUTC.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const endOfWeekAgoUTC = new Date(startOfWeekAgoUTC.getTime() + 24 * 60 * 60 * 1000);
+      const weekAgoEntries = lastThirtyDaysData.documents.filter(doc => {
+        if (doc.$id === dbResult.$id) return false;
+        const docDate = new Date(doc.$createdAt);
+        return docDate >= startOfWeekAgoUTC && docDate < endOfWeekAgoUTC;
+      });
+      const followersWeekAgo = weekAgoEntries.length > 0 ? weekAgoEntries[weekAgoEntries.length - 1].followers : null;
+
       // Authenticate with Wykop API
       wykopAuthResponse = await fetch('https://wykop.pl/api/v3/refresh-token', {
         method: 'POST',
@@ -491,10 +647,13 @@ export default async ({ req, res, log, error }) => {
         minute: '2-digit',
         timeZone: 'Europe/Warsaw'
       });
+
+      const sentimentValue = parseInt(sentimentResult.sentiment);
+      const emoji = sentimentValue <= 20 ? '💩' : sentimentValue <= 40 ? '🚽' : sentimentValue <= 60 ? '🆗' : sentimentValue <= 80 ? '🚀' : '🔥';
       
       const postContent = `[Krach & Śmieciuch Index](https://wykop-index.appwrite.network/) - stan na ${formattedDate}
 
-**${sentimentResult.sentiment}/100 ${parseInt(sentimentResult.sentiment) <= 20 ? '💩' : parseInt(sentimentResult.sentiment) <= 40 ? '🚽' : parseInt(sentimentResult.sentiment) <= 60 ? '🆗' : parseInt(sentimentResult.sentiment) <= 80 ? '🚀' : '🔥'}**
+**${sentimentResult.sentiment}/100 ${emoji}** ${yesterdaySentiment !== null ? `(wczoraj: ${yesterdaySentiment})` : ''}
 
 ${sentimentResult.summary}
 
@@ -504,9 +663,13 @@ ${Array.isArray(mostDiscussed) && mostDiscussed.length > 0 ? mostDiscussed.slice
 **Topowi analitycy:**
 ${Array.isArray(mostActiveUsers) && mostActiveUsers.length > 0 ? mostActiveUsers.slice(0, 3).map(user => `👤 @${user.username} (${user.sentiment}): [_"${user.quote}"_](${user.url})`).join('\n') : ''}
 
-${tomekSentimentResult.sentiment ? `\n**TomekIndicator®:** ${tomekSentimentResult.sentiment}/100\n${tomekSentimentResult.summary}` : ''}
+${tomekSentimentResult.sentiment && `\n**TomekIndicator®:** ${tomekSentimentResult.sentiment}/100\n${tomekSentimentResult.summary}`}
 
-❔ Masz pytanie? Oznacz mnie we wpisie lub komentarzu na #gielda ( ͡° ͜ʖ ͡°) 
+**Statystyki:**
+📜 Ilość wpisów w ostatnich 24h: ${entriesLast24h} ${yesterdayEntryCount !== null ? `(wczoraj: ${yesterdayEntryCount}; zmiana: ${entriesLast24h - yesterdayEntryCount})` : ''}
+👀 Obserwujący tag: ${followersCount} ${followersWeekAgo !== null ? `(tydzień temu: ${followersWeekAgo}; zmiana: ${followersCount - followersWeekAgo})` : ''}
+
+❔ Masz pytanie? Oznacz mnie we wpisie lub komentarzu na #gielda ( ͡° ͜ʖ ͡°)
 
 #gielda #wykopindex #krachsmieciuchindex`;
 
