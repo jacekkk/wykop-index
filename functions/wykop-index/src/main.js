@@ -80,7 +80,7 @@ export default async ({ req, res, log, error }) => {
           // Change model to gemini-2.5-flash on 3rd attempt
           if (attempt === 3) {
             model = 'gemini-2.5-flash';
-            log('Switching to gemini-2.5-flash for final attempt');
+            log(`Switching to ${model} for final attempt`);
           }
           return await fn();
         } catch (err) {
@@ -150,6 +150,8 @@ export default async ({ req, res, log, error }) => {
     let shouldContinue = true;
     let newestEntryTime = null;
     let oldestEntryTime = null;
+    const userEntryCounts = {};
+    const userCommentCounts = {};
 
     while (shouldContinue) {
       const pageNumbers = Array.from({ length: batchSize }, (_, i) => currentBatchStart + i);
@@ -184,6 +186,18 @@ export default async ({ req, res, log, error }) => {
             recentCount++;
             if (!newestEntryTime) newestEntryTime = entry.created_at;
             oldestEntryTime = entry.created_at;
+            
+            // Count entries per user
+            const username = entry.author.username;
+            userEntryCounts[username] = (userEntryCounts[username] || 0) + 1;
+            
+            // Count comments per user
+            if (entry.comments?.items) {
+              for (const comment of entry.comments.items) {
+                const commentUsername = comment.author.username;
+                userCommentCounts[commentUsername] = (userCommentCounts[commentUsername] || 0) + 1;
+              }
+            }
           } else {
             entriesLast24h += recentCount;
             shouldContinue = false;
@@ -196,6 +210,27 @@ export default async ({ req, res, log, error }) => {
       }
       currentBatchStart += batchSize;
     }
+    
+    // Helper to find top user from counts object
+    const getTopUser = (counts) => {
+      const entries = Object.entries(counts);
+      if (entries.length === 0) return { username: '', count: 0 };
+      const [username, count] = entries.sort((a, b) => b[1] - a[1])[0];
+      return { username, count };
+    };
+    
+    // Find top users
+    const topEntryUser = getTopUser(userEntryCounts);
+    const topCommentUser = getTopUser(userCommentCounts);
+    
+    // Calculate combined totals
+    const allUsers = new Set([...Object.keys(userEntryCounts), ...Object.keys(userCommentCounts)]);
+    const userCombinedCounts = {};
+    for (const user of allUsers) {
+      userCombinedCounts[user] = (userEntryCounts[user] || 0) + (userCommentCounts[user] || 0);
+    }
+    
+    const topCombinedUser = getTopUser(userCombinedCounts);
 
     // Helper to format timestamps as UTC strings
     const formatDateTime = (date) => {
@@ -650,6 +685,9 @@ export default async ({ req, res, log, error }) => {
 
       const sentimentValue = parseInt(sentimentResult.sentiment);
       const emoji = sentimentValue <= 20 ? '💩' : sentimentValue <= 40 ? '🚽' : sentimentValue <= 60 ? '🆗' : sentimentValue <= 80 ? '🚀' : '🔥';
+      const entriesChangePercentage = entriesLast24h && yesterdayEntryCount 
+        ? `${(((entriesLast24h - yesterdayEntryCount) / yesterdayEntryCount) * 100) >= 0 ? '+' : ''}${Math.round((entriesLast24h - yesterdayEntryCount) / yesterdayEntryCount * 100)}%` 
+        : '';
       
       const postContent = `[Krach & Śmieciuch Index](https://wykop-index.appwrite.network/) - stan na ${formattedDate}
 
@@ -666,8 +704,11 @@ ${Array.isArray(mostActiveUsers) && mostActiveUsers.length > 0 ? mostActiveUsers
 ${tomekSentimentResult.sentiment && `\n**TomekIndicator®:** ${tomekSentimentResult.sentiment}/100\n${tomekSentimentResult.summary}`}
 
 **Statystyki:**
-📜 Ilość wpisów w ostatnich 24h: ${entriesLast24h} ${yesterdayEntryCount !== null ? `(wczoraj: ${yesterdayEntryCount}; zmiana: ${entriesLast24h - yesterdayEntryCount})` : ''}
 👀 Obserwujący tag: ${followersCount} ${followersWeekAgo !== null ? `(tydzień temu: ${followersWeekAgo}; zmiana: ${followersCount - followersWeekAgo})` : ''}
+📜 Ilość wpisów w ostatnich 24h: ${entriesLast24h} ${yesterdayEntryCount !== null ? `(wczoraj: ${yesterdayEntryCount}; zmiana: ${entriesChangePercentage})` : ''}
+🥇 Najwięcej wpisów + komentarzy: @${topCombinedUser.username} (${topCombinedUser.count})
+🥈 Najwięcej wpisów: @${topEntryUser.username} (${topEntryUser.count})
+🥉 Najwięcej komentarzy: @${topCommentUser.username} (${topCommentUser.count})
 
 ❔ Masz pytanie? Oznacz mnie we wpisie lub komentarzu na #gielda ( ͡° ͜ʖ ͡°)
 

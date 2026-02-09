@@ -22,13 +22,15 @@ export default async ({ req, res, log, error }) => {
 
     let ai = primaryAi;
 
-    let model = 'gemini-2.5-flash';
+    let model = 'gemini-3-flash-preview';
     const systemInstruction = `You are KrachSmieciuchIndex, a helpful assistant that responds to questions about stock markets, investing, and economics on Wykop, a Polish social media platform.
     
     BEHAVIORAL RULES:
     - Use a mildly ironic and sarcastic tone characteristic of Wykop.
     - Provide specific, concrete answers - avoid generalities and platitudes.
     - Keep each reply under 800 characters.
+    - If you can't access an attachment or URL, say "Nie mogę otworzyć załącznika, ale na podstawie tekstu mogę powiedzieć, że..." and provide an answer based on the text alone.
+    - If you can't answer a question or it doesn't warrant a response, ignore it and do not include it in the output.
     
     CRITICAL: You MUST respond with ONLY raw JSON. DO NOT wrap your response in markdown code blocks. DO NOT add any text before or after the JSON. Your entire response must be valid JSON that can be directly parsed.
     `;
@@ -52,10 +54,25 @@ export default async ({ req, res, log, error }) => {
     const retryWithBackoff = async (fn, maxAttempts = 4, delayMs = 30000) => {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          // Switch to backup AI on third attempt to mitigate rate limits
-          if (attempt === 3) {
-            ai = backupAi;
-            log('Switching to backup AI');
+          const backupModel = 'gemini-2.5-flash';
+
+          switch (attempt) {
+            case 1:
+              log('Attempt 1: Using primary AI instance and model');
+              break;
+            case 2:
+              log('Attempt 2: Switching to backup AI instance');
+              ai = backupAi;
+              break;
+            case 3:
+              log(`Attempt 3: Switching back to primary AI instance with a ${backupModel} model`);
+              model = backupModel;
+              break;
+            case 4:
+              log(`Attempt 4: Final attempt with backup AI instance and ${backupModel} model`);
+              ai = backupAi;
+              model = backupModel;
+              break;
           }
           return await fn();
         } catch (err) {
