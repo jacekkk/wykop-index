@@ -302,6 +302,9 @@ export default async ({ req, res, log, error }) => {
       currentBatchStart += batchSize;
     }
 
+    // Helper function to strip query parameters from URL
+    const stripQueryParams = (url) => url ? url.split('?')[0] : null;
+
     const parseComment = (comment, entryId) => ({
       id: comment.id,
       url: `https://wykop.pl/wpis/${entryId}#${comment.id}`,
@@ -309,8 +312,8 @@ export default async ({ req, res, log, error }) => {
       created_at: comment.created_at,
       votes: comment.votes.up,
       content: comment.content,
-      photo_url: comment.media?.photo?.url || null,
-      embed_url: comment.media?.embed?.url || null
+      photo_url: stripQueryParams(comment.media?.photo?.url),
+      embed_url: stripQueryParams(comment.media?.embed?.url)
     });
 
     const parsePosts = (posts) => posts.map(entry => ({
@@ -321,8 +324,8 @@ export default async ({ req, res, log, error }) => {
       votes: entry.votes.up,
       content: entry.content,
       comments: entry.comments?.items?.map(comment => parseComment(comment, entry.id)),
-      photo_url: entry.media?.photo?.url || null,
-      embed_url: entry.media?.embed?.url || null
+      photo_url: stripQueryParams(entry.media?.photo?.url),
+      embed_url: stripQueryParams(entry.media?.embed?.url)
     }));
 
     const parsedData = parsePosts(recentEntries);
@@ -378,7 +381,7 @@ export default async ({ req, res, log, error }) => {
         contents: prompt,
         config: {
           httpOptions: {
-            timeout: 60000, // 60 seconds
+            timeout: 120000, // 120 seconds
           },
           systemInstruction: systemInstruction,
           tools: [{urlContext: {}}],
@@ -489,7 +492,7 @@ export default async ({ req, res, log, error }) => {
           contents: tomekPrompt,
           config: {
             httpOptions: {
-              timeout: 60000, // 60 seconds
+              timeout: 120000, // 120 seconds
             },
             systemInstruction: systemInstruction,
             tools: [{urlContext: {}}],
@@ -595,7 +598,10 @@ export default async ({ req, res, log, error }) => {
           tomekSummary: tomekSentimentResult.summary,
           imageId: imageId,
           followers: followersCount,
-          entriesLast24h: entriesLast24h
+          entriesLast24h: entriesLast24h,
+          mostEntriesLast24h: JSON.stringify(topEntryUser),
+          mostCommentsLast24h: JSON.stringify(topCommentUser),
+          mostCombinedLast24h: JSON.stringify(topCombinedUser)
         }
     );
 
@@ -685,6 +691,7 @@ export default async ({ req, res, log, error }) => {
 
       const sentimentValue = parseInt(sentimentResult.sentiment);
       const emoji = sentimentValue <= 20 ? '💩' : sentimentValue <= 40 ? '🚽' : sentimentValue <= 60 ? '🆗' : sentimentValue <= 80 ? '🚀' : '🔥';
+      const followersChange = followersWeekAgo !== null ? `${followersCount - followersWeekAgo >= 0 ? '+' : '-'}${followersCount - followersWeekAgo}` : '';
       const entriesChangePercentage = entriesLast24h && yesterdayEntryCount 
         ? `${(((entriesLast24h - yesterdayEntryCount) / yesterdayEntryCount) * 100) >= 0 ? '+' : ''}${Math.round((entriesLast24h - yesterdayEntryCount) / yesterdayEntryCount * 100)}%` 
         : '';
@@ -704,9 +711,9 @@ ${Array.isArray(mostActiveUsers) && mostActiveUsers.length > 0 ? mostActiveUsers
 ${tomekSentimentResult.sentiment && `\n**TomekIndicator®:** ${tomekSentimentResult.sentiment}/100\n${tomekSentimentResult.summary}`}
 
 **Statystyki:**
-👀 Obserwujący tag: ${followersCount} ${followersWeekAgo !== null ? `(tydzień temu: ${followersWeekAgo}; zmiana: ${followersCount - followersWeekAgo})` : ''}
+👀 Obserwujący tag: ${followersCount} ${followersWeekAgo !== null ? `(tydzień temu: ${followersWeekAgo}; zmiana: ${followersChange})` : ''}
 📜 Ilość wpisów w ostatnich 24h: ${entriesLast24h} ${yesterdayEntryCount !== null ? `(wczoraj: ${yesterdayEntryCount}; zmiana: ${entriesChangePercentage})` : ''}
-🥇 Najwięcej wpisów + komentarzy: @${topCombinedUser.username} (${topCombinedUser.count})
+🥇 Najaktywniejszy ogółem: @${topCombinedUser.username} (${topCombinedUser.count})
 🥈 Najwięcej wpisów: @${topEntryUser.username} (${topEntryUser.count})
 🥉 Najwięcej komentarzy: @${topCommentUser.username} (${topCommentUser.count})
 

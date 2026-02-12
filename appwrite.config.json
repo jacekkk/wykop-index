@@ -55,7 +55,7 @@
             ],
             "events": [],
             "schedule": "0 8,13,18,23 * * *",
-            "timeout": 300,
+            "timeout": 600,
             "entrypoint": "src/main.js",
             "commands": "npm install",
             "specification": "s-0.5vcpu-512mb",
@@ -194,6 +194,33 @@
                     "min": 1,
                     "max": 1000000,
                     "default": null
+                },
+                {
+                    "key": "mostEntriesLast24h",
+                    "type": "string",
+                    "required": false,
+                    "array": false,
+                    "size": 500,
+                    "default": null,
+                    "encrypt": false
+                },
+                {
+                    "key": "mostCommentsLast24h",
+                    "type": "string",
+                    "required": false,
+                    "array": false,
+                    "size": 500,
+                    "default": null,
+                    "encrypt": false
+                },
+                {
+                    "key": "mostCombinedLast24h",
+                    "type": "string",
+                    "required": false,
+                    "array": false,
+                    "size": 500,
+                    "default": null,
+                    "encrypt": false
                 }
             ],
             "indexes": []

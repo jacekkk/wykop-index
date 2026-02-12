@@ -22,7 +22,7 @@ export default async ({ req, res, log, error }) => {
 
     let ai = primaryAi;
 
-    let model = 'gemini-3-flash-preview';
+    let model = 'gemini-2.5-flash';
     const systemInstruction = `You are KrachSmieciuchIndex, a helpful assistant that responds to questions about stock markets, investing, and economics on Wykop, a Polish social media platform.
     
     BEHAVIORAL RULES:
@@ -54,18 +54,19 @@ export default async ({ req, res, log, error }) => {
     const retryWithBackoff = async (fn, maxAttempts = 4, delayMs = 30000) => {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          const backupModel = 'gemini-2.5-flash';
+          const backupModel = 'gemini-3-flash-preview';
 
           switch (attempt) {
             case 1:
-              log('Attempt 1: Using primary AI instance and model');
+              log(`Attempt 1: Using primary AI instance and ${model} model`);
               break;
             case 2:
-              log('Attempt 2: Switching to backup AI instance');
+              log(`Attempt 2: Using backup AI instance and ${model} model`);
               ai = backupAi;
               break;
             case 3:
-              log(`Attempt 3: Switching back to primary AI instance with a ${backupModel} model`);
+              log(`Attempt 3: Using primary AI instance and ${backupModel} model`);
+              ai = primaryAi;
               model = backupModel;
               break;
             case 4:
@@ -74,7 +75,15 @@ export default async ({ req, res, log, error }) => {
               model = backupModel;
               break;
           }
-          return await fn();
+
+          const tools = [{ urlContext: {} }];
+
+          // googleSearch is not supported in gemini-3-flash-preview free tier
+          if (model === 'gemini-2.5-flash') {
+            tools.push({ googleSearch: {} });
+          }
+
+          return await fn(tools);
         } catch (err) {
           if (attempt === maxAttempts) {
             throw err;
@@ -92,6 +101,9 @@ export default async ({ req, res, log, error }) => {
     const polandOffset = new Date(nowPolandStr).getTime() - nowUTC.getTime();
     const oneHourAgo = new Date(nowUTC.getTime() - 60 * 60 * 1000);
 
+    // Helper function to strip query parameters from URL
+    const stripQueryParams = (url) => url ? url.split('?')[0] : null;
+
     // Helper function to parse comments
     const parseComment = (comment, entryId) => ({
       id: comment.id,
@@ -100,8 +112,8 @@ export default async ({ req, res, log, error }) => {
       created_at: comment.created_at,
       votes: comment.votes.up,
       content: comment.content,
-      photo_url: comment.media?.photo?.url || null,
-      embed_url: comment.media?.embed?.url || null
+      photo_url: stripQueryParams(comment.media?.photo?.url),
+      embed_url: stripQueryParams(comment.media?.embed?.url)
     });
 
     // --- AUTHENTICATION SECTION ---
@@ -219,8 +231,8 @@ export default async ({ req, res, log, error }) => {
           created_at: entry.created_at,
           votes: entry.votes.up,
           content: entry.content,
-          photo_url: entry.media?.photo?.url || null,
-          embed_url: entry.media?.embed?.url || null,
+          photo_url: stripQueryParams(entry.media?.photo?.url),
+          embed_url: stripQueryParams(entry.media?.embed?.url),
         },
         comments: fullComments.map(comment => parseComment(comment, entry.id))
       };
@@ -259,19 +271,18 @@ export default async ({ req, res, log, error }) => {
 
       const mentionsSchema = { type: 'array-of-objects', requiredFields: ['id', 'username', 'url', 'post', 'reply'] };
 
-      await retryWithBackoff(async () => {
+      await retryWithBackoff(async (tools) => {
+        log(`Tools enabled: ${JSON.stringify(tools.map(t => Object.keys(t)[0]))}`);
+
         const mentionsResponse = await ai.models.generateContent({
           model: model,
           contents: mentionsPrompt,
           config: {
             httpOptions: {
-              timeout: 90000, // 90 seconds
+              timeout: 120000, // 120 seconds
             },
             systemInstruction: systemInstruction,
-            tools: [
-              { googleSearch: {} },
-              { urlContext: {} }
-            ]
+            tools: tools
           },
         });
 
@@ -317,7 +328,7 @@ export default async ({ req, res, log, error }) => {
 
     for (const replyObj of mentionsResult) {
       try {
-        log(`Posting a reply to "${replyObj.post}":\n"${replyObj.reply}"`);
+        log(`Posting a reply to ${replyObj.url} for user ${replyObj.username}`);
 
           const postContent = `@${replyObj.username} ${replyObj.reply}`;
 

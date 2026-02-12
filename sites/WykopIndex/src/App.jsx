@@ -4,13 +4,41 @@ import { databases, storage } from "./lib/appwrite";
 import { Query } from "appwrite";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
+// Constants
+const DATABASE_ID = '69617178003ac8ef4fba';
+const SENTIMENT_COLLECTION_ID = 'sentiment';
+const REPLIES_COLLECTION_ID = 'replies';
+const BUCKET_ID = '6961715000182498a35a';
+
+// Helper functions
+const getSentimentColor = (sentiment) => {
+  if (sentiment <= 20) return '#b91c1c';
+  if (sentiment <= 40) return '#ef4444';
+  if (sentiment <= 60) return '#FFBF00';
+  if (sentiment <= 80) return '#4CBB17';
+  return '#008000';
+};
+
+const formatUTCDate = (date) => {
+  return new Date(date).toLocaleDateString('pl-PL', {
+    day: '2-digit',
+    month: '2-digit',
+    timeZone: 'UTC'
+  });
+};
+
 function App() {
   const [sentimentData, setSentimentData] = useState([]);
   const [loadingSentiment, setLoadingSentiment] = useState(true);
+  const [error, setError] = useState(null);
   const [imageUrl, setImageUrl] = useState(null);
-  const [yesterdaySentiment, setYesterdaySentiment] = useState(null);
-  const [weekAgoSentiment, setWeekAgoSentiment] = useState(null);
-  const [historicalData, setHistoricalData] = useState([]);
+  const [chartData, setChartData] = useState({ sentiment: [], entries: [] });
+  const [comparisons, setComparisons] = useState({
+    yesterdaySentiment: null,
+    weekAgoSentiment: null,
+    yesterdayEntries: null,
+    weekAgoFollowers: null
+  });
   const [replies, setReplies] = useState([]);
   const [loadingReplies, setLoadingReplies] = useState(true);
 
@@ -21,8 +49,8 @@ function App() {
       try {
         // Fetch the latest sentiment entry
         const response = await databases.listDocuments(
-          '69617178003ac8ef4fba', // Database ID
-          'sentiment', // Table ID
+          DATABASE_ID,
+          SENTIMENT_COLLECTION_ID,
           [
             Query.orderDesc('$createdAt'),
             Query.limit(1)
@@ -34,7 +62,10 @@ function App() {
           ...doc,
           mostActiveUsers: doc.mostActiveUsers?.startsWith('[') ? JSON.parse(doc.mostActiveUsers) : [],
           mostDiscussed: doc.mostDiscussed?.startsWith('[') ? JSON.parse(doc.mostDiscussed) : [],
-          mentionsReplies: doc.mentionsReplies?.startsWith('[') ? JSON.parse(doc.mentionsReplies) : []
+          mentionsReplies: doc.mentionsReplies?.startsWith('[') ? JSON.parse(doc.mentionsReplies) : [],
+          mostEntriesLast24h: doc.mostEntriesLast24h?.startsWith('{') ? JSON.parse(doc.mostEntriesLast24h) : null,
+          mostCommentsLast24h: doc.mostCommentsLast24h?.startsWith('{') ? JSON.parse(doc.mostCommentsLast24h) : null,
+          mostCombinedLast24h: doc.mostCombinedLast24h?.startsWith('{') ? JSON.parse(doc.mostCombinedLast24h) : null
         }));
         
         setSentimentData(parsedDocuments);
@@ -44,8 +75,8 @@ function App() {
           const now = new Date();
           const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
           const historicalResponse = await databases.listDocuments(
-            '69617178003ac8ef4fba',
-            'sentiment',
+            DATABASE_ID,
+            SENTIMENT_COLLECTION_ID,
             [
               Query.greaterThan('$createdAt', thirtyDaysAgo.toISOString()),
               Query.orderAsc('$createdAt'),
@@ -54,11 +85,7 @@ function App() {
           );
           
           const chartData = historicalResponse.documents.map(doc => ({
-            date: new Date(doc.$createdAt).toLocaleDateString('pl-PL', { 
-              day: '2-digit', 
-              month: '2-digit',
-              timeZone: 'Europe/Warsaw'
-            }),
+            date: formatUTCDate(doc.$createdAt),
             sentiment: doc.sentiment,
             tomekSentiment: doc.tomekSentiment,
             timestamp: doc.$createdAt,
@@ -86,50 +113,80 @@ function App() {
             tomekSentiment: Math.round(group.tomekSentiments.reduce((sum, val) => sum + val, 0) / group.tomekSentiments.length),
             timestamp: group.timestamp
           }));
-          
-          setHistoricalData(averagedData);
 
-          // Extract yesterday's sentiment from averaged data
+          // Extract yesterday's and week ago sentiment from averaged data
           const nowUTC = new Date();
           const yesterdayUTC = new Date(nowUTC.getTime() - 24 * 60 * 60 * 1000);
-          const yesterdayFormatted = yesterdayUTC.toLocaleDateString('pl-PL', {
-            day: '2-digit',
-            month: '2-digit',
-            timeZone: 'Europe/Warsaw'
-          });
+          const yesterdayFormatted = formatUTCDate(yesterdayUTC);
           const yesterdayData = averagedData.find(item => item.date === yesterdayFormatted);
-          if (yesterdayData) {
-            setYesterdaySentiment(yesterdayData.sentiment);
-          }
 
-          // Extract week ago sentiment from averaged data
           const weekAgoUTC = new Date(nowUTC.getTime() - 7 * 24 * 60 * 60 * 1000);
-          const weekAgoFormatted = weekAgoUTC.toLocaleDateString('pl-PL', {
-            day: '2-digit',
-            month: '2-digit',
-            timeZone: 'Europe/Warsaw'
-          });
+          const weekAgoFormatted = formatUTCDate(weekAgoUTC);
           const weekAgoData = averagedData.find(item => item.date === weekAgoFormatted);
-          if (weekAgoData) {
-            setWeekAgoSentiment(weekAgoData.sentiment);
-          }
+
+          // Extract yesterday's entries and week ago followers using UTC boundaries
+          const startOfTodayUTC = new Date(Date.UTC(nowUTC.getUTCFullYear(), nowUTC.getUTCMonth(), nowUTC.getUTCDate()));
+          const startOfYesterdayUTC = new Date(startOfTodayUTC.getTime() - 24 * 60 * 60 * 1000);
+          const startOfWeekAgoUTC = new Date(startOfTodayUTC.getTime() - 7 * 24 * 60 * 60 * 1000);
+          const endOfWeekAgoUTC = new Date(startOfWeekAgoUTC.getTime() + 24 * 60 * 60 * 1000);
+          
+          const yesterdayEntries = historicalResponse.documents.filter(doc => {
+            if (response.documents.length > 0 && doc.$id === response.documents[0].$id) return false;
+            const docDate = new Date(doc.$createdAt);
+            return docDate >= startOfYesterdayUTC && docDate < startOfTodayUTC;
+          });
+          
+          const weekAgoEntries = historicalResponse.documents.filter(doc => {
+            if (response.documents.length > 0 && doc.$id === response.documents[0].$id) return false;
+            const docDate = new Date(doc.$createdAt);
+            return docDate >= startOfWeekAgoUTC && docDate < endOfWeekAgoUTC;
+          });
+
+          // Process entries data for chart
+          const entriesChartData = historicalResponse.documents
+            .filter(doc => doc.entriesLast24h)
+            .map(doc => ({
+              date: formatUTCDate(doc.$createdAt),
+              entries: doc.entriesLast24h,
+              timestamp: doc.$createdAt
+            }));
+          
+          // Group by date and take the latest entry for each date
+          const entriesGroupedByDate = entriesChartData.reduce((acc, item) => {
+            if (!acc[item.date] || new Date(item.timestamp) > new Date(acc[item.date].timestamp)) {
+              acc[item.date] = item;
+            }
+            return acc;
+          }, {});
+          
+          const entriesData = Object.values(entriesGroupedByDate).sort((a, b) => 
+            new Date(a.timestamp) - new Date(b.timestamp)
+          );
+          
+          // Set all state in one operation
+          setChartData({ sentiment: averagedData, entries: entriesData });
+          setComparisons({
+            yesterdaySentiment: yesterdayData?.sentiment ?? null,
+            weekAgoSentiment: weekAgoData?.sentiment ?? null,
+            yesterdayEntries: yesterdayEntries.length > 0 ? yesterdayEntries[yesterdayEntries.length - 1].entriesLast24h : null,
+            weekAgoFollowers: weekAgoEntries.length > 0 ? weekAgoEntries[weekAgoEntries.length - 1].followers : null
+          });
         } catch (err) {
           console.error('Error fetching historical data:', err);
+          setError('Nie udało się pobrać danych historycznych');
         }
 
         // Fetch the composite image from the latest sentiment data
         if (response.documents.length > 0) {
-          const fileId = response.documents[0].imageId || 'wykopindex_v2'; // Default to 'wykopindex_v2' if imageId is null
-          const imageViewUrl = storage.getFileView(
-            '6961715000182498a35a', // Bucket ID
-            fileId
-          );
+          const fileId = response.documents[0].imageId || 'wykopindex_v2';
+          const imageViewUrl = storage.getFileView(BUCKET_ID, fileId);
           setImageUrl(imageViewUrl);
         }
 
         setLoadingSentiment(false);
       } catch (err) {
         console.error('Error fetching data:', err);
+        setError('Nie udało się pobrać danych o sentymencie');
         setLoadingSentiment(false);
       }
     }
@@ -138,8 +195,8 @@ function App() {
       setLoadingReplies(true);
       try {
         const response = await databases.listDocuments(
-          '69617178003ac8ef4fba', // Database ID
-          'replies', // Table ID
+          DATABASE_ID,
+          REPLIES_COLLECTION_ID,
           [
             Query.orderDesc('$createdAt'),
             Query.limit(5)
@@ -170,6 +227,13 @@ function App() {
 
   return (
     <main className="flex flex-col items-center p-2 md:p-5 min-h-screen bg-white">
+      {/* Error Display */}
+      {error && (
+        <div className="w-full max-w-4xl mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
+          <p className="text-red-800 text-sm">{error}</p>
+        </div>
+      )}
+
       {/* Sentiment Data Display */}
       <section className="mt-2 w-full max-w-4xl">
         {loadingSentiment ? (
@@ -213,15 +277,9 @@ function App() {
                 )}
                 <div className="p-6">
                 <div className="flex flex-col items-center mb-4">
-                  <div 
+                  <div
                     className="text-5xl font-bold mb-3"
-                    style={{
-                      color: item.sentiment <= 20 ? '#b91c1c' :
-                             item.sentiment <= 40 ? '#ef4444' :
-                             item.sentiment <= 60 ? '#FFBF00' :
-                             item.sentiment <= 80 ? '#4CBB17' :
-                             '#008000'
-                    }}
+                    style={{ color: getSentimentColor(item.sentiment) }}
                   >
                     {item.sentiment}
                   </div>
@@ -230,11 +288,7 @@ function App() {
                       className="h-full"
                       style={{ 
                         width: `${item.sentiment}%`,
-                        backgroundColor: item.sentiment <= 20 ? '#b91c1c' :
-                                       item.sentiment <= 40 ? '#ef4444' :
-                                       item.sentiment <= 60 ? '#FFBF00' :
-                                       item.sentiment <= 80 ? '#4CBB17' :
-                                       '#008000'
+                        backgroundColor: getSentimentColor(item.sentiment)
                       }}
                     ></div>
                   </div>
@@ -254,19 +308,13 @@ function App() {
                 <div className="mt-4 flex flex-col gap-2 text-sm">
                   <div className="flex items-center gap-2">
                     <span className="text-[#97979B]">Wczoraj:</span>
-                    {yesterdaySentiment !== null ? (
+                    {comparisons.yesterdaySentiment !== null ? (
                       <>
                         <span 
                           className="font-bold"
-                          style={{
-                            color: yesterdaySentiment <= 20 ? '#b91c1c' :
-                                   yesterdaySentiment <= 40 ? '#ef4444' :
-                                   yesterdaySentiment <= 60 ? '#FFBF00' :
-                                   yesterdaySentiment <= 80 ? '#4CBB17' :
-                                   '#008000'
-                          }}
+                          style={{ color: getSentimentColor(comparisons.yesterdaySentiment) }}
                         >
-                          {yesterdaySentiment}
+                          {comparisons.yesterdaySentiment}
                         </span>
                       </>
                     ) : (
@@ -275,19 +323,13 @@ function App() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-[#97979B]">Tydzień temu:</span>
-                    {weekAgoSentiment !== null ? (
+                    {comparisons.weekAgoSentiment !== null ? (
                       <>
                         <span 
                           className="font-bold"
-                          style={{
-                            color: weekAgoSentiment <= 20 ? '#b91c1c' :
-                                   weekAgoSentiment <= 40 ? '#ef4444' :
-                                   weekAgoSentiment <= 60 ? '#FFBF00' :
-                                   weekAgoSentiment <= 80 ? '#4CBB17' :
-                                   '#008000'
-                          }}
+                          style={{ color: getSentimentColor(comparisons.weekAgoSentiment) }}
                         >
-                          {weekAgoSentiment}
+                          {comparisons.weekAgoSentiment}
                         </span>
                       </>
                     ) : (
@@ -375,54 +417,174 @@ function App() {
                     </div>
                   )}
 
-                  {historicalData.length > 0 && (
-                    <div className="mt-6" id="ostatnie-30-dni">
-                      <h3 className="text-lg font-bold text-[#2D2D31] mb-1">
-                        <a href="#ostatnie-30-dni" className="hover:underline">Ostatnie 30 dni</a>
+                  {/* Statistics Section */}
+                  {(item.followers || item.entriesLast24h || item.mostEntriesLast24h || item.mostCommentsLast24h || item.mostCombinedLast24h) && (
+                    <div className="mt-6" id="statystyki">
+                      <h3 className="text-lg font-bold text-[#CD7F32] mb-3">
+                        <a href="#statystyki" className="hover:underline">Statystyki tagu</a>
                       </h3>
-                      <ResponsiveContainer width="100%" height={300}>
-                        <LineChart data={historicalData} margin={{ top: 5, right: 5, left: -30, bottom: 5 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#EDEDF0" />
-                          <XAxis 
-                            dataKey="date" 
-                            stroke="#2D2D31"
-                            style={{ fontSize: '12px' }}
-                            angle={-45}
-                            textAnchor="end"
-                            height={60}
-                            interval="preserveStartEnd"
-                          />
-                          <YAxis 
-                            domain={[0, 100]}
-                            stroke="#2D2D31"
-                            style={{ fontSize: '12px' }}
-                          />
-                          <Tooltip 
-                            contentStyle={{ 
-                              backgroundColor: 'white', 
-                              border: '1px solid #EDEDF0',
-                              borderRadius: '4px'
-                            }}
-                          />
-                          <Legend />
-                          <Line 
-                            type="monotone" 
-                            dataKey="sentiment" 
-                            stroke="#0047AB" 
-                            strokeWidth={2}
-                            name="Krach & Śmieciuch Index"
-                            dot={{ fill: '#0047AB', r: 3 }}
-                          />
-                          <Line 
-                            type="monotone" 
-                            dataKey="tomekSentiment" 
-                            stroke="#808080" 
-                            strokeWidth={2}
-                            name="TomekIndicator®"
-                            dot={{ fill: '#808080', r: 3 }}
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {item.followers && (
+                          <div className="bg-gray-50 p-4 rounded-lg">
+                            <div className="text-sm text-[#97979B] mb-1">Obserwujący</div>
+                            <div className="text-2xl font-bold text-[#2D2D31]">{item.followers.toLocaleString('pl-PL')}</div>
+                            {comparisons.weekAgoFollowers !== null && (
+                              <div className="text-sm mt-2">
+                                <span className="text-[#97979B]">Tydzień temu: </span>
+                                <span className="font-semibold text-[#2D2D31]">{comparisons.weekAgoFollowers.toLocaleString('pl-PL')}</span>
+                                {item.followers !== comparisons.weekAgoFollowers && (
+                                  <span className={`ml-1 font-semibold ${item.followers > comparisons.weekAgoFollowers ? 'text-[#008000]' : 'text-[#b91c1c]'}`}>
+                                    ({item.followers > comparisons.weekAgoFollowers ? '+' : '-'}{Math.abs(item.followers - comparisons.weekAgoFollowers).toLocaleString('pl-PL')})
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {item.entriesLast24h && (
+                          <div className="bg-gray-50 p-4 rounded-lg">
+                            <div className="text-sm text-[#97979B] mb-1">Wpisy (ostatnie 24h)</div>
+                            <div className="text-2xl font-bold text-[#2D2D31]">{item.entriesLast24h.toLocaleString('pl-PL')}</div>
+                            {comparisons.yesterdayEntries !== null && (
+                              <div className="text-sm mt-2">
+                                <span className="text-[#97979B]">Wczoraj: </span>
+                                <span className="font-semibold text-[#2D2D31]">{comparisons.yesterdayEntries.toLocaleString('pl-PL')}</span>
+                                {item.entriesLast24h !== comparisons.yesterdayEntries && (
+                                  <span className={`ml-1 font-semibold ${item.entriesLast24h > comparisons.yesterdayEntries ? 'text-[#008000]' : 'text-[#b91c1c]'}`}>
+                                    ({((item.entriesLast24h - comparisons.yesterdayEntries) / comparisons.yesterdayEntries * 100) >= 0 ? '+' : ''}{Math.round((item.entriesLast24h - comparisons.yesterdayEntries) / comparisons.yesterdayEntries * 100)}%)
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {(item.mostEntriesLast24h || item.mostCommentsLast24h || item.mostCombinedLast24h) && (
+                          <div className="bg-gray-50 p-4 rounded-lg md:col-span-2">
+                            <div className="text-sm text-[#97979B] mb-3">Najaktywniejsi użytkownicy (ostatnie 24h)</div>
+                            <div className="flex justify-between items-start">
+                              {item.mostCombinedLast24h && (
+                                <div className="text-sm flex-1">
+                                  <div className="text-[#97979B] mb-1">Najaktywniejszy ogółem:</div>
+                                  <div className="font-bold text-[#2D2D31]">
+                                    @{item.mostCombinedLast24h.username} ({item.mostCombinedLast24h.count})
+                                  </div>
+                                </div>
+                              )}
+                              {item.mostEntriesLast24h && (
+                                <div className="text-sm flex-1 text-center">
+                                  <div className="text-[#97979B] mb-1">Najwięcej wpisów:</div>
+                                  <div className="font-semibold text-[#2D2D31]">
+                                    @{item.mostEntriesLast24h.username} ({item.mostEntriesLast24h.count})
+                                  </div>
+                                </div>
+                              )}
+                              {item.mostCommentsLast24h && (
+                                <div className="text-sm flex-1 text-right">
+                                  <div className="text-[#97979B] mb-1">Najwięcej komentarzy:</div>
+                                  <div className="font-semibold text-[#2D2D31]">
+                                    @{item.mostCommentsLast24h.username} ({item.mostCommentsLast24h.count})
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {(chartData.sentiment.length > 0 || chartData.entries.length > 0) && (
+                    <div className="mt-6" id="wykresy">
+                      <h3 className="text-lg font-bold text-[#2D2D31] mb-3">
+                        <a href="#wykresy" className="hover:underline">Wykresy</a>
+                      </h3>
+                      
+                      {chartData.sentiment.length > 0 && (
+                        <div className="mb-6">
+                          <h4 className="text-md font-semibold text-[#2D2D31] mb-2">Sentyment (ostatnie 30 dni)</h4>
+                          <ResponsiveContainer width="100%" height={300}>
+                            <LineChart data={chartData.sentiment} margin={{ top: 5, right: 5, left: -30, bottom: 5 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#EDEDF0" />
+                              <XAxis 
+                                dataKey="date" 
+                                stroke="#2D2D31"
+                                style={{ fontSize: '12px' }}
+                                angle={-45}
+                                textAnchor="end"
+                                height={60}
+                                interval="preserveStartEnd"
+                              />
+                              <YAxis 
+                                domain={[0, 100]}
+                                stroke="#2D2D31"
+                                style={{ fontSize: '12px' }}
+                              />
+                              <Tooltip 
+                                contentStyle={{ 
+                                  backgroundColor: 'white', 
+                                  border: '1px solid #EDEDF0',
+                                  borderRadius: '4px'
+                                }}
+                              />
+                              <Legend />
+                              <Line 
+                                type="monotone" 
+                                dataKey="sentiment" 
+                                stroke="#0047AB" 
+                                strokeWidth={2}
+                                name="Krach & Śmieciuch Index"
+                                dot={{ fill: '#0047AB', r: 3 }}
+                              />
+                              <Line 
+                                type="monotone" 
+                                dataKey="tomekSentiment" 
+                                stroke="#808080" 
+                                strokeWidth={2}
+                                name="TomekIndicator®"
+                                dot={{ fill: '#808080', r: 3 }}
+                              />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
+                      )}
+
+                      {chartData.entries.length > 0 && (
+                        <div>
+                          <h4 className="text-md font-semibold text-[#2D2D31] mb-2">Wpisy (ostatnie 30 dni)</h4>
+                          <ResponsiveContainer width="100%" height={300}>
+                            <LineChart data={chartData.entries} margin={{ top: 5, right: 5, left: -30, bottom: 5 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#EDEDF0" />
+                              <XAxis 
+                                dataKey="date" 
+                                stroke="#2D2D31"
+                                style={{ fontSize: '12px' }}
+                                angle={-45}
+                                textAnchor="end"
+                                height={60}
+                                interval="preserveStartEnd"
+                              />
+                              <YAxis 
+                                stroke="#2D2D31"
+                                style={{ fontSize: '12px' }}
+                              />
+                              <Tooltip 
+                                contentStyle={{ 
+                                  backgroundColor: 'white', 
+                                  border: '1px solid #EDEDF0',
+                                  borderRadius: '4px'
+                                }}
+                              />
+                              <Line 
+                                type="monotone" 
+                                dataKey="entries" 
+                                stroke="#CD7F32" 
+                                strokeWidth={2}
+                                dot={{ fill: '#CD7F32', r: 3 }}
+                              />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
+                      )}
                     </div>
                   )}
 
