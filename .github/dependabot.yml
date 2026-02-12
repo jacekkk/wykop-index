@@ -1,0 +1,37 @@
+version: 2
+updates:
+  # Wykop Index function
+  - package-ecosystem: "npm"
+    directory: "/functions/wykop-index"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      production-dependencies:
+        dependency-type: "production"
+      development-dependencies:
+        dependency-type: "development"
+
+  # Wykop Post function
+  - package-ecosystem: "npm"
+    directory: "/functions/wykop-post"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      production-dependencies:
+        dependency-type: "production"
+      development-dependencies:
+        dependency-type: "development"
+
+  # WykopIndex site
+  - package-ecosystem: "npm"
+    directory: "/sites/WykopIndex"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      production-dependencies:
+        dependency-type: "production"
+      development-dependencies:
+        dependency-type: "development"
