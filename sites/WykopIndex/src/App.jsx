@@ -461,28 +461,28 @@ function App() {
                         {(item.mostEntriesLast24h || item.mostCommentsLast24h || item.mostCombinedLast24h) && (
                           <div className="bg-gray-50 p-4 rounded-lg md:col-span-2">
                             <div className="text-sm text-[#97979B] mb-3">Najaktywniejsi użytkownicy (ostatnie 24h)</div>
-                            <div className="flex justify-between items-start">
+                            <div className="flex flex-col md:flex-row md:justify-between items-start gap-3 md:gap-0">
                               {item.mostCombinedLast24h && (
                                 <div className="text-sm flex-1">
                                   <div className="text-[#97979B] mb-1">Najaktywniejszy ogółem:</div>
-                                  <div className="font-bold text-[#2D2D31]">
-                                    @{item.mostCombinedLast24h.username} ({item.mostCombinedLast24h.count})
+                                  <div className="font-bold text-[#2D2D31] break-words">
+                                    {item.mostCombinedLast24h.username} ({item.mostCombinedLast24h.count})
                                   </div>
                                 </div>
                               )}
                               {item.mostEntriesLast24h && (
-                                <div className="text-sm flex-1 text-center">
+                                <div className="text-sm flex-1 md:text-center">
                                   <div className="text-[#97979B] mb-1">Najwięcej wpisów:</div>
-                                  <div className="font-semibold text-[#2D2D31]">
-                                    @{item.mostEntriesLast24h.username} ({item.mostEntriesLast24h.count})
+                                  <div className="font-semibold text-[#2D2D31] break-words">
+                                    {item.mostEntriesLast24h.username} ({item.mostEntriesLast24h.count})
                                   </div>
                                 </div>
                               )}
                               {item.mostCommentsLast24h && (
-                                <div className="text-sm flex-1 text-right">
+                                <div className="text-sm flex-1 md:text-right">
                                   <div className="text-[#97979B] mb-1">Najwięcej komentarzy:</div>
-                                  <div className="font-semibold text-[#2D2D31]">
-                                    @{item.mostCommentsLast24h.username} ({item.mostCommentsLast24h.count})
+                                  <div className="font-semibold text-[#2D2D31] break-words">
+                                    {item.mostCommentsLast24h.username} ({item.mostCommentsLast24h.count})
                                   </div>
                                 </div>
                               )}
@@ -576,7 +576,8 @@ function App() {
                               />
                               <Line 
                                 type="monotone" 
-                                dataKey="entries" 
+                                dataKey="entries"
+                                name="Wpisy" 
                                 stroke="#CD7F32" 
                                 strokeWidth={2}
                                 dot={{ fill: '#CD7F32', r: 3 }}

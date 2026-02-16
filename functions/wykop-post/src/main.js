@@ -26,9 +26,10 @@ export default async ({ req, res, log, error }) => {
     const systemInstruction = `You are KrachSmieciuchIndex, a helpful assistant that responds to questions about stock markets, investing, and economics on Wykop, a Polish social media platform.
     
     BEHAVIORAL RULES:
-    - Use a mildly ironic and sarcastic tone characteristic of Wykop.
-    - Provide specific, concrete answers - avoid generalities and platitudes.
     - Keep each reply under 800 characters.
+    - Use a mildly ironic and sarcastic tone characteristic of Wykop but only where appropriate based on the content you're responding to. If the question is straightforward and serious, respond in a direct manner.
+    - Provide specific, concrete answers - avoid generalities and platitudes.
+    - If a question is about the specific stocks or your recommendations, do not provide generic advice. Research the stocks, recent news, and provide a data-driven answer based on that.
     - If you can't access an attachment or URL, say "Nie mogę otworzyć załącznika, ale na podstawie tekstu mogę powiedzieć, że..." and provide an answer based on the text alone.
     - If you can't answer a question or it doesn't warrant a response, ignore it and do not include it in the output.
     
@@ -212,18 +213,23 @@ export default async ({ req, res, log, error }) => {
       
       // Determine which content triggered the notification
       let questionToAnswer = null;
+      let replyToUsername = null;
+      
       if (notification.type === 'new_entry') {
         // The entry itself mentioned the bot
         questionToAnswer = entry.content;
+        replyToUsername = entry.author.username;
       } else if (notification.type === 'new_comment_in_entry' && notification.comment) {
         // A specific comment mentioned the bot
         questionToAnswer = notification.comment.content;
+        replyToUsername = notification.comment.author.username;
       }
 
       notificationIds.push(notification.id);
       
       return {
         questionToAnswer: questionToAnswer,
+        replyToUsername: replyToUsername,
         post: {
           id: entry.id,
           url: `https://wykop.pl/wpis/${entry.id}`,
@@ -255,21 +261,21 @@ export default async ({ req, res, log, error }) => {
       
       Odpowiedz w nastepujacym formacie JSON (flat array):
       [
-        {"id": "skopiuj wartosc z post.id", "username": "nazwa uzytkownika", "url": "link do wpisu lub komentarza ktory zawiera pytanie", "post": "tekst z pola questionToAnswer (jezeli jest dluzszy niz 300 znakow, uzyj streszczenia)", "reply": "twoja odpowiedz"},
-        {"id": "skopiuj wartosc z post.id", "username": "nazwa uzytkownika", "url": "link do wpisu lub komentarza ktory zawiera pytanie", "post": "tekst z pola questionToAnswer (jezeli jest dluzszy niz 300 znakow, uzyj streszczenia)", "reply": "twoja odpowiedz"}
+        {"postId": "skopiuj wartosc z post.id", "username": "skopiuj wartosc z replyToUsername", "url": "link do wpisu lub komentarza ktory zawiera pytanie", "post": "tekst z pola questionToAnswer (jezeli jest dluzszy niz 300 znakow, uzyj streszczenia)", "reply": "twoja odpowiedz"},
+        {"postId": "skopiuj wartosc z post.id", "username": "skopiuj wartosc z replyToUsername", "url": "link do wpisu lub komentarza ktory zawiera pytanie", "post": "tekst z pola questionToAnswer (jezeli jest dluzszy niz 300 znakow, uzyj streszczenia)", "reply": "twoja odpowiedz"}
       ]
       
       WAZNE:
-      - Pole "id" MUSI byc rowne wartosci "post.id" z danych wejsciowych (np. jesli post.id to 12345, to id w odpowiedzi to 12345).
+      - Pole "postId" MUSI byc rowne wartosci "post.id" z danych wejsciowych - to jest ID wpisu (entry), NIE komentarza.
+      - Pole "username" MUSI byc rowne wartosci "replyToUsername" z danych wejsciowych.
       - Odpowiadaj TYLKO na tekst z pola questionToAnswer, ale uzyj pola post i comments dla kontekstu.
       - Dlugosc odpowiedzi na kazde z pytan (pole "reply") nie moze przekroczyc 800 znakow.
-      - Upewnij sie, ze pole username to uzytkownik, ktory faktycznie napisal dany cytat, a nie inny uzytkownik, ktory skomentowal ten sam wpis.
-      - Wszystkie pola (id, username, url, post, reply) sa wymagane w kazdym obiekcie.
+      - Wszystkie pola (postId, username, url, post, reply) sa wymagane w kazdym obiekcie.
       - Jezeli nie ma pytan do odpowiedzi, zwroc pusta tablice [].
       
       Wpisy: ${JSON.stringify(parsedNotifications)}`;
 
-      const mentionsSchema = { type: 'array-of-objects', requiredFields: ['id', 'username', 'url', 'post', 'reply'] };
+      const mentionsSchema = { type: 'array-of-objects', requiredFields: ['postId', 'username', 'url', 'post', 'reply'] };
 
       await retryWithBackoff(async (tools) => {
         log(`Tools enabled: ${JSON.stringify(tools.map(t => Object.keys(t)[0]))}`);
@@ -328,11 +334,11 @@ export default async ({ req, res, log, error }) => {
 
     for (const replyObj of mentionsResult) {
       try {
-        log(`Posting a reply to ${replyObj.url} for user ${replyObj.username}`);
+        log(`Posting a reply to ${replyObj.postId} for user ${replyObj.username}`);
 
           const postContent = `@${replyObj.username} ${replyObj.reply}`;
 
-          const postResponse = await fetch(`https://wykop.pl/api/v3/entries/${replyObj.id}/comments`, {
+          const postResponse = await fetch(`https://wykop.pl/api/v3/entries/${replyObj.postId}/comments`, {
             method: 'POST',
             headers: {
               'accept': 'application/json',
@@ -347,6 +353,8 @@ export default async ({ req, res, log, error }) => {
             })
           });
 
+          log(`Post response status: ${postResponse.status}`);
+          
           if (!postResponse.ok) {
             const errorText = await postResponse.text();
             throw new Error(`Failed to post to Wykop: ${postResponse.status} ${errorText}`);
@@ -382,18 +390,26 @@ export default async ({ req, res, log, error }) => {
     // Mark notifications as read
     if (notificationIds.length > 0) {
       log(`Marking ${notificationIds.length} notifications as read...`);
-      notificationIds.forEach(notificationId => {
-        fetch(`https://wykop.pl/api/v3/notifications/entries/${notificationId}`, {
-          method: 'PUT',
-          headers: {
-            'accept': 'application/json',
-            'Authorization': `Bearer ${wykopToken}`
+      await Promise.all(notificationIds.map(async notificationId => {
+        try {
+          const markReadResponse = await fetch(`https://wykop.pl/api/v3/notifications/entries/${notificationId}`, {
+            method: 'PUT',
+            headers: {
+              'accept': 'application/json',
+              'Authorization': `Bearer ${wykopToken}`
+            }
+          });
+          
+          if (markReadResponse.ok) {
+            log(`Marked notification ID as read: ${notificationId}`);
+          } else {
+            error(`Failed to mark notification ${notificationId} as read: ${markReadResponse.status}`);
           }
-        });
-
-        log(`Marked notification ID as read: ${notificationId}`);
-      });
-    };
+        } catch (markError) {
+          error(`Error marking notification ${notificationId} as read: ${markError.message}`);
+        }
+      }));
+    }
 
     return res.empty();
   } catch(err) {

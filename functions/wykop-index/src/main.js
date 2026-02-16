@@ -211,12 +211,21 @@ export default async ({ req, res, log, error }) => {
       currentBatchStart += batchSize;
     }
     
-    // Helper to find top user from counts object
+    // Helper to find top user(s) from counts object
     const getTopUser = (counts) => {
       const entries = Object.entries(counts);
       if (entries.length === 0) return { username: '', count: 0 };
-      const [username, count] = entries.sort((a, b) => b[1] - a[1])[0];
-      return { username, count };
+      
+      const sorted = entries.sort((a, b) => b[1] - a[1]);
+      const maxCount = sorted[0][1];
+      
+      // Find all users with the max count
+      const topUsers = sorted.filter(([_, count]) => count === maxCount);
+      
+      // Always prepend @ to usernames
+      const username = topUsers.map(([user, _]) => `@${user}`).join(', ');
+      
+      return { username, count: maxCount };
     };
     
     // Find top users
@@ -354,15 +363,15 @@ export default async ({ req, res, log, error }) => {
         {"asset": "nazwa spolki/aktywa", "reasoning": "krotkie uzasadnienie"}
       ],
       "topQuotes": [
-        {"username": "nazwa uzytkownika", "sentiment": "BULLISH lub BEARISH", "quote": "krotki cytat", "url": "link do wpisu lub komentarza ktory zawiera cytat"},
-        {"username": "nazwa uzytkownika", "sentiment": "BULLISH lub BEARISH", "quote": "krotki cytat", "url": "link do wpisu lub komentarza ktory zawiera cytat"},
-        {"username": "nazwa uzytkownika", "sentiment": "BULLISH lub BEARISH", "quote": "krotki cytat", "url": "link do wpisu lub komentarza ktory zawiera cytat"}
+        {"username": "nazwa uzytkownika", "sentiment": "BULLISH/BEARISH/NEUTRALNY", "quote": "krotki cytat", "url": "link do wpisu lub komentarza ktory zawiera cytat"},
+        {"username": "nazwa uzytkownika", "sentiment": "BULLISH/BEARISH/NEUTRALNY", "quote": "krotki cytat", "url": "link do wpisu lub komentarza ktory zawiera cytat"},
+        {"username": "nazwa uzytkownika", "sentiment": "BULLISH/BEARISH/NEUTRALNY", "quote": "krotki cytat", "url": "link do wpisu lub komentarza ktory zawiera cytat"}
       ]
     }
     
     WAZNE:
     - mostDiscussed: trzy najczesciej omawiane spolki lub aktywa.
-    - topQuotes: top 3 krotkich cytatow z najczesciej plusowanych wpisow uzytkownikow. UWAGA: Upewnij sie, ze pole username to uzytkownik, ktory faktycznie napisal dany cytat, a nie inny uzytkownik, ktory skomentowal ten sam wpis.
+    - topQuotes: top 3 krotkich cytatow z najczesciej plusowanych wpisow uzytkownikow. UWAGA: Upewnij sie, ze pole username to uzytkownik, ktory faktycznie napisal dany cytat, a nie inny uzytkownik, ktory skomentowal ten sam wpis. Cytuj pelne slowa, w tym przeklenstwa - nie cenzuruj ich skrotami (np. "kurwa", nie "k...").
     - Wszystkie pola w odpowiedzi sa wymagane.
     
     Wpisy: ${JSON.stringify(parsedData)}`;
@@ -713,9 +722,9 @@ ${tomekSentimentResult.sentiment && `\n**TomekIndicator®:** ${tomekSentimentRes
 **Statystyki:**
 👀 Obserwujący tag: ${followersCount} ${followersWeekAgo !== null ? `(tydzień temu: ${followersWeekAgo}; zmiana: ${followersChange})` : ''}
 📜 Ilość wpisów w ostatnich 24h: ${entriesLast24h} ${yesterdayEntryCount !== null ? `(wczoraj: ${yesterdayEntryCount}; zmiana: ${entriesChangePercentage})` : ''}
-🥇 Najaktywniejszy ogółem: @${topCombinedUser.username} (${topCombinedUser.count})
-🥈 Najwięcej wpisów: @${topEntryUser.username} (${topEntryUser.count})
-🥉 Najwięcej komentarzy: @${topCommentUser.username} (${topCommentUser.count})
+🥇 Najaktywniejszy ogółem: ${topCombinedUser.username} (${topCombinedUser.count})
+🥈 Najwięcej wpisów: ${topEntryUser.username} (${topEntryUser.count})
+🥉 Najwięcej komentarzy: ${topCommentUser.username} (${topCommentUser.count})
 
 ❔ Masz pytanie? Oznacz mnie we wpisie lub komentarzu na #gielda ( ͡° ͜ʖ ͡°)
 
