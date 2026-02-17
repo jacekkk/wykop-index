@@ -22,6 +22,11 @@ export default async ({ req, res, log, error }) => {
     let model = 'gemini-3-flash-preview';
     const systemInstruction = `You are a helpful assistant that analyzes sentiment about stock markets on a Polish social media platform.
     The username of an account from which your responses are posted is KrachSmieciuchIndex.
+
+    BEHAVIORAL RULES:
+    - Always respond in Polish.
+    - When quoting the users, do not censor their language - quote the full words, including any swear words (e.g. "kurwa", not "k...").
+
     CRITICAL: You MUST respond with ONLY raw JSON. DO NOT wrap your response in markdown code blocks. DO NOT add any text before or after the JSON. Your entire response must be valid JSON that can be directly parsed.`;
 
     // Helper function to clean markdown code blocks from JSON responses
@@ -123,7 +128,7 @@ export default async ({ req, res, log, error }) => {
     const polandOffset = new Date(nowPolandStr).getTime() - nowUTC.getTime();
     
     // For Wykop API operations, we work with Poland time since API returns Poland timestamps
-    const hoursToLookBack = 5.5; // 5 hours + 30 min buffer for any delays
+    const hoursToLookBack = 6.5; // 6 hours + 30 min buffer for any delays
     const lookBackTime = new Date(nowUTC.getTime() - hoursToLookBack * 60 * 60 * 1000);
     const twentyFourHoursAgo = new Date(nowUTC.getTime() - 24 * 60 * 60 * 1000);
 
@@ -371,7 +376,7 @@ export default async ({ req, res, log, error }) => {
     
     WAZNE:
     - mostDiscussed: trzy najczesciej omawiane spolki lub aktywa.
-    - topQuotes: top 3 krotkich cytatow z najczesciej plusowanych wpisow uzytkownikow. UWAGA: Upewnij sie, ze pole username to uzytkownik, ktory faktycznie napisal dany cytat, a nie inny uzytkownik, ktory skomentowal ten sam wpis. Cytuj pelne slowa, w tym przeklenstwa - nie cenzuruj ich skrotami (np. "kurwa", nie "k...").
+    - topQuotes: top 3 krotkich cytatow z najczesciej plusowanych wpisow uzytkownikow. UWAGA: Upewnij sie, ze pole username to uzytkownik, ktory faktycznie napisal dany cytat, a nie inny uzytkownik, ktory skomentowal ten sam wpis.
     - Wszystkie pola w odpowiedzi sa wymagane.
     
     Wpisy: ${JSON.stringify(parsedData)}`;
