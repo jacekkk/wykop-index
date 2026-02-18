@@ -22,6 +22,11 @@ export default async ({ req, res, log, error }) => {
     let model = 'gemini-3-flash-preview';
     const systemInstruction = `You are a helpful assistant that analyzes sentiment about stock markets on a Polish social media platform.
     The username of an account from which your responses are posted is KrachSmieciuchIndex.
+
+    BEHAVIORAL RULES:
+    - Always respond in Polish.
+    - When quoting the users, do not censor their language - quote the full words, including any swear words (e.g. "kurwa", not "k...").
+
     CRITICAL: You MUST respond with ONLY raw JSON. DO NOT wrap your response in markdown code blocks. DO NOT add any text before or after the JSON. Your entire response must be valid JSON that can be directly parsed.`;
 
     // Helper function to clean markdown code blocks from JSON responses
@@ -123,7 +128,7 @@ export default async ({ req, res, log, error }) => {
     const polandOffset = new Date(nowPolandStr).getTime() - nowUTC.getTime();
     
     // For Wykop API operations, we work with Poland time since API returns Poland timestamps
-    const hoursToLookBack = 5.5; // 5 hours + 30 min buffer for any delays
+    const hoursToLookBack = 6.5; // 6 hours + 30 min buffer for any delays
     const lookBackTime = new Date(nowUTC.getTime() - hoursToLookBack * 60 * 60 * 1000);
     const twentyFourHoursAgo = new Date(nowUTC.getTime() - 24 * 60 * 60 * 1000);
 
@@ -211,12 +216,21 @@ export default async ({ req, res, log, error }) => {
       currentBatchStart += batchSize;
     }
     
-    // Helper to find top user from counts object
+    // Helper to find top user(s) from counts object
     const getTopUser = (counts) => {
       const entries = Object.entries(counts);
       if (entries.length === 0) return { username: '', count: 0 };
-      const [username, count] = entries.sort((a, b) => b[1] - a[1])[0];
-      return { username, count };
+      
+      const sorted = entries.sort((a, b) => b[1] - a[1]);
+      const maxCount = sorted[0][1];
+      
+      // Find all users with the max count
+      const topUsers = sorted.filter(([_, count]) => count === maxCount);
+      
+      // Always prepend @ to usernames
+      const username = topUsers.map(([user, _]) => `@${user}`).join(', ');
+      
+      return { username, count: maxCount };
     };
     
     // Find top users
@@ -354,9 +368,9 @@ export default async ({ req, res, log, error }) => {
         {"asset": "nazwa spolki/aktywa", "reasoning": "krotkie uzasadnienie"}
       ],
       "topQuotes": [
-        {"username": "nazwa uzytkownika", "sentiment": "BULLISH lub BEARISH", "quote": "krotki cytat", "url": "link do wpisu lub komentarza ktory zawiera cytat"},
-        {"username": "nazwa uzytkownika", "sentiment": "BULLISH lub BEARISH", "quote": "krotki cytat", "url": "link do wpisu lub komentarza ktory zawiera cytat"},
-        {"username": "nazwa uzytkownika", "sentiment": "BULLISH lub BEARISH", "quote": "krotki cytat", "url": "link do wpisu lub komentarza ktory zawiera cytat"}
+        {"username": "nazwa uzytkownika", "sentiment": "BULLISH/BEARISH/NEUTRALNY", "quote": "krotki cytat", "url": "link do wpisu lub komentarza ktory zawiera cytat"},
+        {"username": "nazwa uzytkownika", "sentiment": "BULLISH/BEARISH/NEUTRALNY", "quote": "krotki cytat", "url": "link do wpisu lub komentarza ktory zawiera cytat"},
+        {"username": "nazwa uzytkownika", "sentiment": "BULLISH/BEARISH/NEUTRALNY", "quote": "krotki cytat", "url": "link do wpisu lub komentarza ktory zawiera cytat"}
       ]
     }
     
@@ -713,9 +727,9 @@ ${tomekSentimentResult.sentiment && `\n**TomekIndicator®:** ${tomekSentimentRes
 **Statystyki:**
 👀 Obserwujący tag: ${followersCount} ${followersWeekAgo !== null ? `(tydzień temu: ${followersWeekAgo}; zmiana: ${followersChange})` : ''}
 📜 Ilość wpisów w ostatnich 24h: ${entriesLast24h} ${yesterdayEntryCount !== null ? `(wczoraj: ${yesterdayEntryCount}; zmiana: ${entriesChangePercentage})` : ''}
-🥇 Najaktywniejszy ogółem: @${topCombinedUser.username} (${topCombinedUser.count})
-🥈 Najwięcej wpisów: @${topEntryUser.username} (${topEntryUser.count})
-🥉 Najwięcej komentarzy: @${topCommentUser.username} (${topCommentUser.count})
+🥇 Najaktywniejszy ogółem: ${topCombinedUser.username} (${topCombinedUser.count})
+🥈 Najwięcej wpisów: ${topEntryUser.username} (${topEntryUser.count})
+🥉 Najwięcej komentarzy: ${topCommentUser.username} (${topCommentUser.count})
 
 ❔ Masz pytanie? Oznacz mnie we wpisie lub komentarzu na #gielda ( ͡° ͜ʖ ͡°)
 

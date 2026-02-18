@@ -54,7 +54,7 @@
                 "files.write"
             ],
             "events": [],
-            "schedule": "0 8,13,18,23 * * *",
+            "schedule": "0 9,15,21 * * *",
             "timeout": 600,
             "entrypoint": "src/main.js",
             "commands": "npm install",
