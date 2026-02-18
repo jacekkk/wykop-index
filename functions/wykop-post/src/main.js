@@ -334,7 +334,7 @@ export default async ({ req, res, log, error }) => {
 
     for (const replyObj of mentionsResult) {
       try {
-        log(`Posting a reply to ${replyObj.postId} for user ${replyObj.username}`);
+        log(`Posting a reply in entry ID ${replyObj.postId} for user ${replyObj.username}`);
 
           const postContent = `@${replyObj.username} ${replyObj.reply}`;
 
