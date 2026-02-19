@@ -8,8 +8,8 @@
     "format": "prettier --write ."
   },
   "dependencies": {
-    "@google/genai": "^1.35.0",
-    "node-appwrite": "^14.1.0"
+    "@google/genai": "^1.42.0",
+    "node-appwrite": "^22.1.0"
   },
   "devDependencies": {
     "prettier": "^3.2.5"
