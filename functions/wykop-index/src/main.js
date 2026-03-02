@@ -476,7 +476,7 @@ export default async ({ req, res, log, error }) => {
 
     if (parsedTomekData.length === 0) {
       tomekSentimentResult = {
-        sentiment: "0",
+        sentiment: null,
         summary: "Tomek od wczoraj siedzi cicho - albo mamy pompę stulecia i siedzi w norze, albo krach stulecia i siedzi na Bahamach za hajs ze 100-letnich obligacji."
       };
     } else {
@@ -608,7 +608,7 @@ export default async ({ req, res, log, error }) => {
           summary: sentimentResult.summary,
           mostActiveUsers: sentimentResult.topQuotes,
           mostDiscussed: sentimentResult.mostDiscussed,
-          tomekSentiment: parseInt(tomekSentimentResult.sentiment),
+          tomekSentiment: tomekSentimentResult.sentiment ? parseInt(tomekSentimentResult.sentiment) : null,
           tomekSummary: tomekSentimentResult.summary,
           imageId: imageId,
           followers: followersCount,
@@ -722,7 +722,7 @@ ${Array.isArray(mostDiscussed) && mostDiscussed.length > 0 ? mostDiscussed.slice
 **Topowi analitycy:**
 ${Array.isArray(mostActiveUsers) && mostActiveUsers.length > 0 ? mostActiveUsers.slice(0, 3).map(user => `👤 @${user.username} (${user.sentiment}): [_"${user.quote}"_](${user.url})`).join('\n') : ''}
 
-${tomekSentimentResult.sentiment && `\n**TomekIndicator®:** ${tomekSentimentResult.sentiment}/100\n${tomekSentimentResult.summary}`}
+${tomekSentimentResult.summary && `\n**TomekIndicator®:**${tomekSentimentResult.sentiment !== null ? ` ${tomekSentimentResult.sentiment}/100` : ''}\n${tomekSentimentResult.summary}`}
 
 **Statystyki:**
 👀 Obserwujący tag: ${followersCount} ${followersWeekAgo !== null ? `(tydzień temu: ${followersWeekAgo}; zmiana: ${followersChange})` : ''}
@@ -731,11 +731,13 @@ ${tomekSentimentResult.sentiment && `\n**TomekIndicator®:** ${tomekSentimentRes
 🥈 Najwięcej wpisów: ${topEntryUser.username} (${topEntryUser.count})
 🥉 Najwięcej komentarzy: ${topCommentUser.username} (${topCommentUser.count})
 
-❔ Masz pytanie? Oznacz mnie we wpisie lub komentarzu na #gielda ( ͡° ͜ʖ ͡°)
+👉 [Wykresy](https://wykop-index.appwrite.network/#wykresy)
+
+Masz pytanie? Oznacz mnie we wpisie lub komentarzu na #gielda ( ͡° ͜ʖ ͡°)
 
 #gielda #wykopindex #krachsmieciuchindex`;
 
-      // Try to upload image, but continue without it if it fails
+      // Image upload
       let photoKey = null;
       try {
         const fileId = imageId || 'wykopindex_v2';
@@ -777,6 +779,50 @@ ${tomekSentimentResult.sentiment && `\n**TomekIndicator®:** ${tomekSentimentRes
         log("Continuing without image");
       }
 
+      // Embedded video upload based on sentiment
+      let embedKey = null;
+      const embedVideoUrl = sentimentValue >= 80 ? process.env.VERY_BULLISH_VIDEO_URL : 
+                            sentimentValue >= 60 ? process.env.BULLISH_VIDEO_URL : 
+                            sentimentValue <= 20 ? process.env.VERY_BEARISH_VIDEO_URL : 
+                            sentimentValue <= 40 ? process.env.BEARISH_VIDEO_URL : 
+                            null;
+
+      if (embedVideoUrl) {
+        try {
+          log(`Uploading embedded video to Wykop from URL: ${embedVideoUrl}`);
+          
+          const embedResponse = await fetch('https://wykop.pl/api/v3/media/embed', {
+            method: 'POST',
+            headers: {
+              'accept': 'application/json',
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${wykopToken}`
+            },
+            body: JSON.stringify({
+              data: {
+                url: embedVideoUrl,
+                age_category: 'all',
+                accept_media_embed_claim: true,
+                commercial: false
+              }
+            })
+          });
+
+          if (embedResponse.ok) {
+            const embedResult = await embedResponse.json();
+            embedKey = embedResult.data.key;
+            log("Embedded video uploaded successfully");
+          } else {
+            const errorText = await embedResponse.text();
+            error(`Failed to upload embedded video: ${embedResponse.status} ${errorText}`);
+            log("Continuing without embedded video");
+          }
+        } catch (embedError) {
+          error(`Error uploading embedded video: ${embedError.message}`);
+          log("Continuing without embedded video");
+        }
+      }
+
       log("Posting to Wykop");
 
       const postData = {
@@ -786,6 +832,10 @@ ${tomekSentimentResult.sentiment && `\n**TomekIndicator®:** ${tomekSentimentRes
 
       if (photoKey) {
         postData.photo = photoKey;
+      }
+
+      if (embedKey) {
+        postData.embed = embedKey;
       }
 
       const postResponse = await fetch('https://wykop.pl/api/v3/entries', {

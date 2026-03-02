@@ -126,7 +126,7 @@
                 {
                     "key": "tomekSentiment",
                     "type": "integer",
-                    "required": true,
+                    "required": false,
                     "array": false,
                     "min": 1,
                     "max": 100,
