@@ -7,10 +7,10 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 10
     groups:
-      production-dependencies:
-        dependency-type: "production"
-      development-dependencies:
-        dependency-type: "development"
+      # group updates to all dependencies into a single PR
+      update-all:
+        patterns:
+          - "*"
 
   # Wykop Post function
   - package-ecosystem: "npm"
@@ -19,10 +19,9 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 10
     groups:
-      production-dependencies:
-        dependency-type: "production"
-      development-dependencies:
-        dependency-type: "development"
+      update-all:
+        patterns:
+          - "*"
 
   # WykopIndex site
   - package-ecosystem: "npm"
@@ -31,7 +30,6 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 10
     groups:
-      production-dependencies:
-        dependency-type: "production"
-      development-dependencies:
-        dependency-type: "development"
+      update-all:
+        patterns:
+          - "*"
