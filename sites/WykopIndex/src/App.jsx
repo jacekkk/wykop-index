@@ -2,7 +2,10 @@ import { useState, useEffect } from "react";
 import "./App.css";
 import { databases, storage } from "./lib/appwrite";
 import { Query } from "appwrite";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { SentimentCandleChart } from './SentimentCandleChart';
+import { SentimentLineChartWithLegend } from './SentimentLineChart';
+import { EntriesChart } from './EntriesChart';
+import { FollowersChart } from './FollowersChart';
 
 // Constants
 const DATABASE_ID = '69617178003ac8ef4fba';
@@ -32,10 +35,10 @@ function App() {
   const [loadingSentiment, setLoadingSentiment] = useState(true);
   const [error, setError] = useState(null);
   const [imageUrl, setImageUrl] = useState(null);
-  const [chartData, setChartData] = useState({ sentiment: [], entries: [] });
+  const [chartData, setChartData] = useState({ sentiment: [], entries: [], followers: [] });
+  const [rawSentimentData, setRawSentimentData] = useState([]);
   const [comparisons, setComparisons] = useState({
     yesterdaySentiment: null,
-    weekAgoSentiment: null,
     yesterdayEntries: null,
     weekAgoFollowers: null
   });
@@ -70,17 +73,19 @@ function App() {
         
         setSentimentData(parsedDocuments);
 
-        // Fetch historical data for last 30 days
+        // Fetch historical data for last 90 days
         try {
           const now = new Date();
-          const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          // Get start of day 90 days ago to include all records from that day
+          const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+          ninetyDaysAgo.setUTCHours(0, 0, 0, 0);
           const historicalResponse = await databases.listDocuments(
             DATABASE_ID,
             SENTIMENT_COLLECTION_ID,
             [
-              Query.greaterThan('$createdAt', thirtyDaysAgo.toISOString()),
+              Query.greaterThanEqual('$createdAt', ninetyDaysAgo.toISOString()),
               Query.orderAsc('$createdAt'),
-              Query.limit(150)
+              Query.limit(500)
             ]
           );
           
@@ -91,6 +96,9 @@ function App() {
             timestamp: doc.$createdAt,
             createdAt: new Date(doc.$createdAt)
           }));
+          
+          // Store raw data for candlestick chart
+          setRawSentimentData(chartData);
           
           // Group by date and calculate averages
           const groupedByDate = chartData.reduce((acc, item) => {
@@ -103,14 +111,18 @@ function App() {
               };
             }
             acc[item.date].sentiments.push(item.sentiment);
-            acc[item.date].tomekSentiments.push(item.tomekSentiment);
+            if (item.tomekSentiment !== null) {
+              acc[item.date].tomekSentiments.push(item.tomekSentiment);
+            }
             return acc;
           }, {});
           
           const averagedData = Object.values(groupedByDate).map(group => ({
             date: group.date,
             sentiment: Math.round(group.sentiments.reduce((sum, val) => sum + val, 0) / group.sentiments.length),
-            tomekSentiment: Math.round(group.tomekSentiments.reduce((sum, val) => sum + val, 0) / group.tomekSentiments.length),
+            tomekSentiment: group.tomekSentiments.length > 0 
+              ? Math.round(group.tomekSentiments.reduce((sum, val) => sum + val, 0) / group.tomekSentiments.length)
+              : null,
             timestamp: group.timestamp
           }));
 
@@ -119,10 +131,6 @@ function App() {
           const yesterdayUTC = new Date(nowUTC.getTime() - 24 * 60 * 60 * 1000);
           const yesterdayFormatted = formatUTCDate(yesterdayUTC);
           const yesterdayData = averagedData.find(item => item.date === yesterdayFormatted);
-
-          const weekAgoUTC = new Date(nowUTC.getTime() - 7 * 24 * 60 * 60 * 1000);
-          const weekAgoFormatted = formatUTCDate(weekAgoUTC);
-          const weekAgoData = averagedData.find(item => item.date === weekAgoFormatted);
 
           // Extract yesterday's entries and week ago followers using UTC boundaries
           const startOfTodayUTC = new Date(Date.UTC(nowUTC.getUTCFullYear(), nowUTC.getUTCMonth(), nowUTC.getUTCDate()));
@@ -162,12 +170,32 @@ function App() {
           const entriesData = Object.values(entriesGroupedByDate).sort((a, b) => 
             new Date(a.timestamp) - new Date(b.timestamp)
           );
+
+          // Process followers data for chart
+          const followersChartData = historicalResponse.documents
+            .filter(doc => doc.followers)
+            .map(doc => ({
+              date: formatUTCDate(doc.$createdAt),
+              followers: doc.followers,
+              timestamp: doc.$createdAt
+            }));
+          
+          // Group by date and take the latest entry for each date
+          const followersGroupedByDate = followersChartData.reduce((acc, item) => {
+            if (!acc[item.date] || new Date(item.timestamp) > new Date(acc[item.date].timestamp)) {
+              acc[item.date] = item;
+            }
+            return acc;
+          }, {});
+          
+          const followersData = Object.values(followersGroupedByDate).sort((a, b) => 
+            new Date(a.timestamp) - new Date(b.timestamp)
+          );
           
           // Set all state in one operation
-          setChartData({ sentiment: averagedData, entries: entriesData });
+          setChartData({ sentiment: averagedData, entries: entriesData, followers: followersData });
           setComparisons({
             yesterdaySentiment: yesterdayData?.sentiment ?? null,
-            weekAgoSentiment: weekAgoData?.sentiment ?? null,
             yesterdayEntries: yesterdayEntries.length > 0 ? yesterdayEntries[yesterdayEntries.length - 1].entriesLast24h : null,
             weekAgoFollowers: weekAgoEntries.length > 0 ? weekAgoEntries[weekAgoEntries.length - 1].followers : null
           });
@@ -321,21 +349,6 @@ function App() {
                       <span className="text-[#97979B]">-</span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[#97979B]">Tydzień temu:</span>
-                    {comparisons.weekAgoSentiment !== null ? (
-                      <>
-                        <span 
-                          className="font-bold"
-                          style={{ color: getSentimentColor(comparisons.weekAgoSentiment) }}
-                        >
-                          {comparisons.weekAgoSentiment}
-                        </span>
-                      </>
-                    ) : (
-                      <span className="text-[#97979B]">-</span>
-                    )}
-                  </div>
                 </div>
                 
                 <div className="space-y-4 mt-6">
@@ -385,32 +398,34 @@ function App() {
                     </div>
                   )}
 
-                  {item.tomekSentiment && (
+                  {item.tomekSummary && (
                     <div className="mt-6" id="tomekindicator">
                         <h3 className="text-lg font-bold text-[#808080] mb-1">
                           <a href="#tomekindicator" className="hover:underline">TomekIndicator®</a>
                         </h3>
                         <div className="space-y-2">
                           <div>
-                            <div className="flex items-center gap-3 mb-2">
-                              <div 
-                                className="text-2xl font-bold"
-                                style={{
-                                  color: '#808080'
-                                }}
-                              >
-                                {item.tomekSentiment}
-                              </div>
-                              <div className="h-2 flex-1 bg-gray-200 rounded-full overflow-hidden">
+                            {item.tomekSentiment !== null && (
+                              <div className="flex items-center gap-3 mb-2">
                                 <div 
-                                  className="h-full"
-                                  style={{ 
-                                    width: `${item.tomekSentiment}%`,
-                                    backgroundColor: '#808080'
+                                  className="text-2xl font-bold"
+                                  style={{
+                                    color: '#808080'
                                   }}
-                                ></div>
+                                >
+                                  {item.tomekSentiment}
+                                </div>
+                                <div className="h-2 flex-1 bg-gray-200 rounded-full overflow-hidden">
+                                  <div 
+                                    className="h-full"
+                                    style={{ 
+                                      width: `${item.tomekSentiment}%`,
+                                      backgroundColor: '#808080'
+                                    }}
+                                  ></div>
+                                </div>
                               </div>
-                            </div>
+                            )}
                             <p className="text-[#2D2D31] font-medium text-sm">{item.tomekSummary}</p>
                           </div>
                         </div>
@@ -465,7 +480,7 @@ function App() {
                               {item.mostCombinedLast24h && (
                                 <div className="text-sm flex-1">
                                   <div className="text-[#97979B] mb-1">Najaktywniejszy ogółem:</div>
-                                  <div className="font-bold text-[#2D2D31] break-words">
+                                  <div className="font-semibold text-[#2D2D31] break-words">
                                     {item.mostCombinedLast24h.username} ({item.mostCombinedLast24h.count})
                                   </div>
                                 </div>
@@ -493,7 +508,7 @@ function App() {
                     </div>
                   )}
 
-                  {(chartData.sentiment.length > 0 || chartData.entries.length > 0) && (
+                  {(chartData.sentiment.length > 0 || chartData.entries.length > 0 || chartData.followers.length > 0) && (
                     <div className="mt-6" id="wykresy">
                       <h3 className="text-lg font-bold text-[#2D2D31] mb-3">
                         <a href="#wykresy" className="hover:underline">Wykresy</a>
@@ -501,89 +516,29 @@ function App() {
                       
                       {chartData.sentiment.length > 0 && (
                         <div className="mb-6">
-                          <h4 className="text-md font-semibold text-[#2D2D31] mb-2">Sentyment (ostatnie 30 dni)</h4>
-                          <ResponsiveContainer width="100%" height={300}>
-                            <LineChart data={chartData.sentiment} margin={{ top: 5, right: 5, left: -30, bottom: 5 }}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#EDEDF0" />
-                              <XAxis 
-                                dataKey="date" 
-                                stroke="#2D2D31"
-                                style={{ fontSize: '12px' }}
-                                angle={-45}
-                                textAnchor="end"
-                                height={60}
-                                interval="preserveStartEnd"
-                              />
-                              <YAxis 
-                                domain={[0, 100]}
-                                stroke="#2D2D31"
-                                style={{ fontSize: '12px' }}
-                              />
-                              <Tooltip 
-                                contentStyle={{ 
-                                  backgroundColor: 'white', 
-                                  border: '1px solid #EDEDF0',
-                                  borderRadius: '4px'
-                                }}
-                              />
-                              <Legend />
-                              <Line 
-                                type="monotone" 
-                                dataKey="sentiment" 
-                                stroke="#0047AB" 
-                                strokeWidth={2}
-                                name="Krach & Śmieciuch Index"
-                                dot={{ fill: '#0047AB', r: 3 }}
-                              />
-                              <Line 
-                                type="monotone" 
-                                dataKey="tomekSentiment" 
-                                stroke="#808080" 
-                                strokeWidth={2}
-                                name="TomekIndicator®"
-                                dot={{ fill: '#808080', r: 3 }}
-                              />
-                            </LineChart>
-                          </ResponsiveContainer>
+                          <h4 className="text-base font-semibold text-[#2D2D31] mb-2">Krach & Śmieciuch Index + TomekIndicator®</h4>
+                          <SentimentLineChartWithLegend data={chartData.sentiment} />
+                        </div>
+                      )}
+
+                      {rawSentimentData.length > 0 && (
+                        <div className="mb-6">
+                          <h4 className="text-base font-semibold text-[#2D2D31] mb-2">Krach & Śmieciuch Index (wykres świecowy)</h4>
+                          <SentimentCandleChart data={rawSentimentData} />
                         </div>
                       )}
 
                       {chartData.entries.length > 0 && (
-                        <div>
-                          <h4 className="text-md font-semibold text-[#2D2D31] mb-2">Wpisy (ostatnie 30 dni)</h4>
-                          <ResponsiveContainer width="100%" height={300}>
-                            <LineChart data={chartData.entries} margin={{ top: 5, right: 5, left: -30, bottom: 5 }}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#EDEDF0" />
-                              <XAxis 
-                                dataKey="date" 
-                                stroke="#2D2D31"
-                                style={{ fontSize: '12px' }}
-                                angle={-45}
-                                textAnchor="end"
-                                height={60}
-                                interval="preserveStartEnd"
-                              />
-                              <YAxis 
-                                stroke="#2D2D31"
-                                style={{ fontSize: '12px' }}
-                              />
-                              <Tooltip 
-                                contentStyle={{ 
-                                  backgroundColor: 'white', 
-                                  border: '1px solid #EDEDF0',
-                                  borderRadius: '4px'
-                                }}
-                              />
-                              <Line 
-                                type="monotone" 
-                                dataKey="entries"
-                                name="Wpisy" 
-                                stroke="#CD7F32" 
-                                strokeWidth={2}
-                                dot={{ fill: '#CD7F32', r: 3 }}
-                              />
-                            </LineChart>
-                          </ResponsiveContainer>
+                        <div className="mb-6">
+                          <h4 className="text-base font-semibold text-[#2D2D31] mb-2">Liczba wpisów na tagu #gielda</h4>
+                          <EntriesChart data={chartData.entries} />
+                        </div>
+                      )}
+
+                      {chartData.followers.length > 0 && (
+                        <div className="mb-6">
+                          <h4 className="text-base font-semibold text-[#2D2D31] mb-2">Liczba obserwujących tag #gielda</h4>
+                          <FollowersChart data={chartData.followers} />
                         </div>
                       )}
                     </div>
