@@ -2,6 +2,19 @@ import * as sdk from 'node-appwrite';
 import { InputFile } from 'node-appwrite/file';
 import { GoogleGenAI } from '@google/genai';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
+import {
+  cleanJsonResponse,
+  validateSchema,
+  formatDateTime,
+  parsePosts,
+  getTopUser,
+  pickRandomUrl,
+} from './utils.js';
+
+// Appwrite resource IDs
+const DATABASE_ID = '69617178003ac8ef4fba';
+const BUCKET_ID = '6961715000182498a35a';
+const SENTIMENT_COLLECTION = 'sentiment';
 
 export default async ({ req, res, log, error }) => {
   try {
@@ -28,55 +41,6 @@ export default async ({ req, res, log, error }) => {
     - When quoting the users, do not censor their language - quote the full words, including any swear words (e.g. "kurwa", not "k...").
 
     CRITICAL: You MUST respond with ONLY raw JSON. DO NOT wrap your response in markdown code blocks. DO NOT add any text before or after the JSON. Your entire response must be valid JSON that can be directly parsed.`;
-
-    // Helper function to clean markdown code blocks from JSON responses
-    const cleanJsonResponse = (text) => {
-      // Remove markdown code block markers
-      let cleaned = text.trim();
-      if (cleaned.startsWith('```json')) {
-        cleaned = cleaned.slice(7);
-      } else if (cleaned.startsWith('```')) {
-        cleaned = cleaned.slice(3);
-      }
-      if (cleaned.endsWith('```')) {
-        cleaned = cleaned.slice(0, -3);
-      }
-      return JSON.parse(cleaned.trim());
-    };
-
-    // Schema validation helper
-    const validateSchema = (data, schema) => {
-      const errors = [];
-      for (const [key, config] of Object.entries(schema)) {
-        const type = typeof config === 'string' ? config : config.type;
-        const requiredFields = config.requiredFields || [];
-        
-        if (!(key in data)) {
-          errors.push(`Missing field: ${key}`);
-        } else if (type === 'string' && typeof data[key] !== 'string') {
-          errors.push(`Field ${key} should be string, got ${typeof data[key]}`);
-        } else if (type === 'array-of-objects' && !Array.isArray(data[key])) {
-          errors.push(`Field ${key} should be array, got ${typeof data[key]}`);
-        } else if (type === 'array-of-objects' && Array.isArray(data[key])) {
-          // Check that all array elements are objects
-          const nonObjectElements = data[key].filter(item => typeof item !== 'object' || item === null);
-          if (nonObjectElements.length > 0) {
-            errors.push(`Field ${key} should be array of objects, but contains non-object elements`);
-          }
-          // Check required fields in each object
-          if (requiredFields.length > 0) {
-            data[key].forEach((item, index) => {
-              requiredFields.forEach(field => {
-                if (!(field in item)) {
-                  errors.push(`Field ${key}[${index}] is missing required field: ${field}`);
-                }
-              });
-            });
-          }
-        }
-      }
-      return errors;
-    };
 
     // Retry helper with exponential backoff
     const retryWithBackoff = async (fn, maxAttempts = 3, delayMs = 30000) => {
@@ -128,7 +92,7 @@ export default async ({ req, res, log, error }) => {
     const polandOffset = new Date(nowPolandStr).getTime() - nowUTC.getTime();
     
     // For Wykop API operations, we work with Poland time since API returns Poland timestamps
-    const hoursToLookBack = 6.5; // 6 hours + 30 min buffer for any delays
+    const hoursToLookBack = 6;
     const lookBackTime = new Date(nowUTC.getTime() - hoursToLookBack * 60 * 60 * 1000);
     const twentyFourHoursAgo = new Date(nowUTC.getTime() - 24 * 60 * 60 * 1000);
 
@@ -148,7 +112,7 @@ export default async ({ req, res, log, error }) => {
     const tagResponseJson = await tagResponse.json();
     const followersCount = tagResponseJson.data.followers;
 
-    log('Starting to count posts from the last 24 hours...');
+    log('Starting to count posts and collecting recent entries for sentiment analysis...');
     let batchSize = 5; // Fetch 5 pages at once
     let entriesLast24h = 0;
     let currentBatchStart = 1;
@@ -157,6 +121,7 @@ export default async ({ req, res, log, error }) => {
     let oldestEntryTime = null;
     const userEntryCounts = {};
     const userCommentCounts = {};
+    let recentEntries = []; // entries from the last 6h for sentiment analysis
 
     while (shouldContinue) {
       const pageNumbers = Array.from({ length: batchSize }, (_, i) => currentBatchStart + i);
@@ -187,7 +152,8 @@ export default async ({ req, res, log, error }) => {
         for (const entry of entries) {
           // Wykop API returns Poland time, parse as UTC then subtract Poland offset
           const entryDate = new Date(entry.created_at.replace(' ', 'T') + 'Z');
-          if (entryDate.getTime() - polandOffset >= twentyFourHoursAgo.getTime()) {
+          const entryTimeUTC = entryDate.getTime() - polandOffset;
+          if (entryTimeUTC >= twentyFourHoursAgo.getTime()) {
             recentCount++;
             if (!newestEntryTime) newestEntryTime = entry.created_at;
             oldestEntryTime = entry.created_at;
@@ -203,6 +169,10 @@ export default async ({ req, res, log, error }) => {
                 userCommentCounts[commentUsername] = (userCommentCounts[commentUsername] || 0) + 1;
               }
             }
+
+            if (entryTimeUTC >= lookBackTime.getTime()) {
+              recentEntries.push(entry);
+            }
           } else {
             entriesLast24h += recentCount;
             shouldContinue = false;
@@ -215,23 +185,6 @@ export default async ({ req, res, log, error }) => {
       }
       currentBatchStart += batchSize;
     }
-    
-    // Helper to find top user(s) from counts object
-    const getTopUser = (counts) => {
-      const entries = Object.entries(counts);
-      if (entries.length === 0) return { username: '', count: 0 };
-      
-      const sorted = entries.sort((a, b) => b[1] - a[1]);
-      const maxCount = sorted[0][1];
-      
-      // Find all users with the max count
-      const topUsers = sorted.filter(([_, count]) => count === maxCount);
-      
-      // Always prepend @ to usernames
-      const username = topUsers.map(([user, _]) => `@${user}`).join(', ');
-      
-      return { username, count: maxCount };
-    };
     
     // Find top users
     const topEntryUser = getTopUser(userEntryCounts);
@@ -246,17 +199,6 @@ export default async ({ req, res, log, error }) => {
     
     const topCombinedUser = getTopUser(userCombinedCounts);
 
-    // Helper to format timestamps as UTC strings
-    const formatDateTime = (date) => {
-      const year = date.getUTCFullYear();
-      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-      const day = String(date.getUTCDate()).padStart(2, '0');
-      const hours = String(date.getUTCHours()).padStart(2, '0');
-      const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-      const seconds = String(date.getUTCSeconds()).padStart(2, '0');
-      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} UTC`;
-    };
-
     // Log times of entries from the last 24h in UTC and Poland time
     if (newestEntryTime && oldestEntryTime) {
       const newestEntryUTC = formatDateTime(new Date(new Date(newestEntryTime.replace(' ', 'T') + 'Z').getTime() - polandOffset));
@@ -265,82 +207,6 @@ export default async ({ req, res, log, error }) => {
     } else {
       log(`Got ${entriesLast24h} posts from the last 24h`);
     }
-
-    // --- SENTIMENT ANALYSIS SECTION ---
-
-    batchSize = 5; // Fetch 5 pages at once for sentiment analysis
-    currentBatchStart = 1;
-    shouldContinue = true;
-    let recentEntries = [];
-
-    while (shouldContinue) {
-      const pageNumbers = Array.from({ length: batchSize }, (_, i) => currentBatchStart + i);
-      log(`Fetching pages ${pageNumbers[0]}-${pageNumbers[pageNumbers.length - 1]} for sentiment analysis`);
-
-      const responses = await Promise.all(
-        pageNumbers.map(page =>
-          fetch(`https://wykop.pl/api/v3/tags/gielda/stream?page=${page}&limit=50&sort=all&type=all&multimedia=false`, {
-            method: 'GET',
-            headers: {
-              'accept': 'application/json',
-              'Authorization': `Bearer ${wykopToken}`
-            }
-          })
-        )
-      );
-
-      const pagesData = await Promise.all(responses.map(r => r.json()));
-
-      for (let i = 0; i < pagesData.length; i++) {
-        const entries = pagesData[i].data;
-        if (!entries || entries.length === 0) {
-          shouldContinue = false;
-          break;
-        }
-
-        for (const entry of entries) {
-          // Wykop API returns Poland time, parse as UTC then subtract Poland offset
-          const entryDate = new Date(entry.created_at.replace(' ', 'T') + 'Z');
-          const entryTimeUTC = entryDate.getTime() - polandOffset;
-          if (entryTimeUTC >= lookBackTime.getTime()) {
-            recentEntries.push(entry);
-          } else if (entryTimeUTC < lookBackTime.getTime()) {
-            // Found an entry older than lookback time, stop
-            shouldContinue = false;
-            break;
-          }
-        }
-
-        if (!shouldContinue) break;
-      }
-      currentBatchStart += batchSize;
-    }
-
-    // Helper function to strip query parameters from URL
-    const stripQueryParams = (url) => url ? url.split('?')[0] : null;
-
-    const parseComment = (comment, entryId) => ({
-      id: comment.id,
-      url: `https://wykop.pl/wpis/${entryId}#${comment.id}`,
-      username: comment.author.username,
-      created_at: comment.created_at,
-      votes: comment.votes.up,
-      content: comment.content,
-      photo_url: stripQueryParams(comment.media?.photo?.url),
-      embed_url: stripQueryParams(comment.media?.embed?.url)
-    });
-
-    const parsePosts = (posts) => posts.map(entry => ({
-      id: entry.id,
-      url: `https://wykop.pl/wpis/${entry.id}`,
-      username: entry.author.username,
-      created_at: entry.created_at,
-      votes: entry.votes.up,
-      content: entry.content,
-      comments: entry.comments?.items?.map(comment => parseComment(comment, entry.id)),
-      photo_url: stripQueryParams(entry.media?.photo?.url),
-      embed_url: stripQueryParams(entry.media?.embed?.url)
-    }));
 
     const parsedData = parsePosts(recentEntries);
 
@@ -539,7 +405,7 @@ export default async ({ req, res, log, error }) => {
       log("Generating image");
       
       const baseImageBuffer = await storage.getFileDownload(
-        '6961715000182498a35a', // Bucket ID
+        BUCKET_ID,
         'wykopindex_v2' // File ID
       );
 
@@ -583,7 +449,7 @@ export default async ({ req, res, log, error }) => {
       const fileName = `wykopindex-${timestamp}`;
       
       const uploadedFile = await storage.createFile(
-        '6961715000182498a35a', // Bucket ID
+        BUCKET_ID,
         fileName, // File ID with timestamp
         InputFile.fromBuffer(imageBuffer, `${fileName}.png`)
       );
@@ -600,13 +466,13 @@ export default async ({ req, res, log, error }) => {
     log("Saving to database");
 
     const dbResult = await databases.createDocument(
-        '69617178003ac8ef4fba',
-        'sentiment',
+        DATABASE_ID,
+        SENTIMENT_COLLECTION,
         sdk.ID.unique(),
         {
           sentiment: parseInt(sentimentResult.sentiment),
           summary: sentimentResult.summary,
-          mostActiveUsers: sentimentResult.topQuotes,
+          topQuotes: sentimentResult.topQuotes,
           mostDiscussed: sentimentResult.mostDiscussed,
           tomekSentiment: tomekSentimentResult.sentiment ? parseInt(tomekSentimentResult.sentiment) : null,
           tomekSummary: tomekSentimentResult.summary,
@@ -629,8 +495,8 @@ export default async ({ req, res, log, error }) => {
       const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
       const lastThirtyDaysData = await databases.listDocuments(
-        '69617178003ac8ef4fba',
-        'sentiment',
+        DATABASE_ID,
+        SENTIMENT_COLLECTION,
         [
           sdk.Query.greaterThan('$createdAt', thirtyDaysAgo.toISOString()),
           sdk.Query.orderAsc('$createdAt'),
@@ -691,7 +557,7 @@ export default async ({ req, res, log, error }) => {
       log("Successfully authenticated with Wykop using refresh token");
       
       // Format the post content
-      const mostActiveUsers = JSON.parse(sentimentResult.topQuotes);
+      const topQuotes = JSON.parse(sentimentResult.topQuotes);
       const mostDiscussed = JSON.parse(sentimentResult.mostDiscussed);
 
       const formattedDate = new Date(dbResult.$createdAt).toLocaleString('pl-PL', {
@@ -720,7 +586,7 @@ ${sentimentResult.summary}
 ${Array.isArray(mostDiscussed) && mostDiscussed.length > 0 ? mostDiscussed.slice(0, 3).map(topic => `🔥 ${topic.asset}: ${topic.reasoning}`).join('\n') : ''}
 
 **Topowi analitycy:**
-${Array.isArray(mostActiveUsers) && mostActiveUsers.length > 0 ? mostActiveUsers.slice(0, 3).map(user => `👤 @${user.username} (${user.sentiment}): [_"${user.quote}"_](${user.url})`).join('\n') : ''}
+${Array.isArray(topQuotes) && topQuotes.length > 0 ? topQuotes.slice(0, 3).map(user => `👤 @${user.username} (${user.sentiment}): [_"${user.quote}"_](${user.url})`).join('\n') : ''}
 
 ${tomekSentimentResult.summary && `\n**TomekIndicator®:**${tomekSentimentResult.sentiment !== null ? ` ${tomekSentimentResult.sentiment}/100` : ''}\n${tomekSentimentResult.summary}`}
 
@@ -781,11 +647,8 @@ Masz pytanie? Oznacz mnie we wpisie lub komentarzu na #gielda ( ͡° ͜ʖ ͡°)
 
       // Embedded video upload based on sentiment
       let embedKey = null;
-      const embedVideoUrl = sentimentValue >= 80 ? process.env.VERY_BULLISH_VIDEO_URL : 
-                            sentimentValue >= 60 ? process.env.BULLISH_VIDEO_URL : 
-                            sentimentValue <= 20 ? process.env.VERY_BEARISH_VIDEO_URL : 
-                            sentimentValue <= 40 ? process.env.BEARISH_VIDEO_URL : 
-                            null;
+
+      const embedVideoUrl = sentimentValue > 60 ? pickRandomUrl(process.env.BULLISH_VIDEO_URLS) : sentimentValue < 40 ? pickRandomUrl(process.env.BEARISH_VIDEO_URLS) : null;
 
       if (embedVideoUrl) {
         try {

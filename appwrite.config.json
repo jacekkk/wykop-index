@@ -142,7 +142,7 @@
                     "encrypt": false
                 },
                 {
-                    "key": "mostActiveUsers",
+                    "key": "topQuotes",
                     "type": "string",
                     "required": false,
                     "array": false,

@@ -95,8 +95,14 @@ export function EntriesChart({ data }) {
 
     entriesSeries.setData(entriesData);
 
-    // Fit content
-    chart.timeScale().fitContent();
+    // Show last 30 days
+    if (entriesData.length > 0) {
+      const latestTime = entriesData[entriesData.length - 1].time;
+      const thirtyDaysAgo = latestTime - 30 * 24 * 60 * 60;
+      chart.timeScale().setVisibleRange({ from: thirtyDaysAgo, to: latestTime });
+    } else {
+      chart.timeScale().fitContent();
+    }
 
     // Handle resize
     const handleResize = () => {
