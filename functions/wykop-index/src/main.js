@@ -38,7 +38,7 @@ export default async ({ req, res, log, error }) => {
 
     BEHAVIORAL RULES:
     - Always respond in Polish.
-    - When quoting the users, do not censor their language - quote the full words, including any swear words (e.g. "kurwa", not "k...").
+    - When quoting the users, do not censor their language - use an exact quote.
 
     CRITICAL: You MUST respond with ONLY raw JSON. DO NOT wrap your response in markdown code blocks. DO NOT add any text before or after the JSON. Your entire response must be valid JSON that can be directly parsed.`;
 
