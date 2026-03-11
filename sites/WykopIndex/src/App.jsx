@@ -63,9 +63,8 @@ function App() {
         // Parse JSON strings into objects
         const parsedDocuments = response.documents.map(doc => ({
           ...doc,
-          mostActiveUsers: doc.mostActiveUsers?.startsWith('[') ? JSON.parse(doc.mostActiveUsers) : [],
+          topQuotes: doc.topQuotes?.startsWith('[') ? JSON.parse(doc.topQuotes) : [],
           mostDiscussed: doc.mostDiscussed?.startsWith('[') ? JSON.parse(doc.mostDiscussed) : [],
-          mentionsReplies: doc.mentionsReplies?.startsWith('[') ? JSON.parse(doc.mentionsReplies) : [],
           mostEntriesLast24h: doc.mostEntriesLast24h?.startsWith('{') ? JSON.parse(doc.mostEntriesLast24h) : null,
           mostCommentsLast24h: doc.mostCommentsLast24h?.startsWith('{') ? JSON.parse(doc.mostCommentsLast24h) : null,
           mostCombinedLast24h: doc.mostCombinedLast24h?.startsWith('{') ? JSON.parse(doc.mostCombinedLast24h) : null
@@ -340,7 +339,7 @@ function App() {
                       <>
                         <span 
                           className="font-bold"
-                          style={{ color: getSentimentColor(comparisons.yesterdaySentiment) }}
+                          style={{ color: "#97979B" }}
                         >
                           {comparisons.yesterdaySentiment}
                         </span>
@@ -378,13 +377,13 @@ function App() {
                     </div>
                   )}
                   
-                  {item.mostActiveUsers && item.mostActiveUsers.length > 0 && (
+                  {item.topQuotes && item.topQuotes.length > 0 && (
                     <div className="mt-6" id="topowi-analitycy">
                       <h3 className="text-lg font-bold text-[#0047AB] mb-1">
                         <a href="#topowi-analitycy" className="hover:underline">Topowi analitycy</a>
                       </h3>
                       <div className="space-y-1">
-                        {item.mostActiveUsers.map((user, index) => (
+                        {item.topQuotes.map((user, index) => (
                           <div key={index} className="flex items-start gap-2">
                             <span className="text-[#2D2D31]">👤</span>
                             <div className="flex-1">

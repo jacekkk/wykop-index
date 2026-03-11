@@ -1,5 +1,10 @@
 import * as sdk from 'node-appwrite';
 import { GoogleGenAI } from '@google/genai';
+import { cleanJsonResponse, stripQueryParams, parseComment } from './utils.js';
+
+// Appwrite resource IDs
+const DATABASE_ID = '69617178003ac8ef4fba';
+const REPLIES_COLLECTION = 'replies';
 
 export default async ({ req, res, log, error }) => {
   try {
@@ -35,21 +40,6 @@ export default async ({ req, res, log, error }) => {
     
     CRITICAL: You MUST respond with ONLY raw JSON. DO NOT wrap your response in markdown code blocks. DO NOT add any text before or after the JSON. Your entire response must be valid JSON that can be directly parsed.
     `;
-
-    // Helper function to clean markdown code blocks from JSON responses
-    const cleanJsonResponse = (text) => {
-      // Remove markdown code block markers
-      let cleaned = text.trim();
-      if (cleaned.startsWith('```json')) {
-        cleaned = cleaned.slice(7);
-      } else if (cleaned.startsWith('```')) {
-        cleaned = cleaned.slice(3);
-      }
-      if (cleaned.endsWith('```')) {
-        cleaned = cleaned.slice(0, -3);
-      }
-      return JSON.parse(cleaned.trim());
-    };
 
     // Retry helper with exponential backoff
     const retryWithBackoff = async (fn, maxAttempts = 4, delayMs = 30000) => {
@@ -101,21 +91,6 @@ export default async ({ req, res, log, error }) => {
     const nowPolandStr = nowUTC.toLocaleString('en-US', { timeZone: 'Europe/Warsaw' });
     const polandOffset = new Date(nowPolandStr).getTime() - nowUTC.getTime();
     const oneHourAgo = new Date(nowUTC.getTime() - 60 * 60 * 1000);
-
-    // Helper function to strip query parameters from URL
-    const stripQueryParams = (url) => url ? url.split('?')[0] : null;
-
-    // Helper function to parse comments
-    const parseComment = (comment, entryId) => ({
-      id: comment.id,
-      url: `https://wykop.pl/wpis/${entryId}#${comment.id}`,
-      username: comment.author.username,
-      created_at: comment.created_at,
-      votes: comment.votes.up,
-      content: comment.content,
-      photo_url: stripQueryParams(comment.media?.photo?.url),
-      embed_url: stripQueryParams(comment.media?.embed?.url)
-    });
 
     // --- AUTHENTICATION SECTION ---
 
@@ -255,7 +230,8 @@ export default async ({ req, res, log, error }) => {
     if (parsedNotifications.length === 0) {
       mentionsResult = [];
     } else {
-      const mentionsPrompt = `Udziel odpowiedzi na wpisy/komentarze, w ktorych zostales oznaczony. Odpowiadaj szczerze i konkretnie, bazujac na danych i faktach, ale jezeli wpis jest ironiczny lub sarkastyczny, odpowiedz w podobnym tonie.
+      const mentionsPrompt = `Udziel odpowiedzi na wpisy/komentarze, w ktorych zostales oznaczony. Jezeli wpis nie zawiera pytania lub prosby, zignoruj go i nie umieszczaj w odpowiedzi.
+      Odpowiadaj szczerze i konkretnie, bazujac na danych i faktach, ale jezeli wpis jest ironiczny lub sarkastyczny, odpowiedz w podobnym tonie.
       Odpowiadaj tylko na tekst z pola questionToAnswer, ale uwzglednij kontekst z calego wpisu (pole post) oraz komentarzy (pole comments), aby dostarczyc precyzyjna odpowiedz.
       Jezeli wpis lub komentarz zawiera zalacznik (pole photo_url lub embed_url), otworz go i uwzglednij jego tresc w swojej odpowiedzi.
       
@@ -368,8 +344,8 @@ export default async ({ req, res, log, error }) => {
             log(`Saving reply to database`);
 
             const dbResult = await databases.createDocument(
-              '69617178003ac8ef4fba',
-              'replies',
+              DATABASE_ID,
+              REPLIES_COLLECTION,
               sdk.ID.unique(),
               {
                 postUrl: replyObj.url,

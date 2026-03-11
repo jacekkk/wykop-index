@@ -111,15 +111,13 @@ export function SentimentCandleChart({ data }) {
     container.appendChild(toolTip);
     tooltipRef.current = toolTip;
 
-    // Fit content and ensure all data is visible
-    chart.timeScale().fitContent();
-    
-    // Set visible range to show all data
+    // Show last 30 days
     if (candleData.length > 0) {
-      chart.timeScale().setVisibleRange({
-        from: candleData[0].time,
-        to: candleData[candleData.length - 1].time,
-      });
+      const latestTime = candleData[candleData.length - 1].time;
+      const thirtyDaysAgo = latestTime - 30 * 24 * 60 * 60;
+      chart.timeScale().setVisibleRange({ from: thirtyDaysAgo, to: latestTime });
+    } else {
+      chart.timeScale().fitContent();
     }
 
     // Add tooltip tracking
@@ -154,14 +152,14 @@ export function SentimentCandleChart({ data }) {
       `;
 
       const y = param.point.y;
-      let left = param.point.x + 20;
-      let top = y;
+      let left = param.point.x - toolTip.offsetWidth - 20;
 
-      if (left > container.clientWidth - toolTip.offsetWidth - 10) {
-        left = param.point.x - toolTip.offsetWidth - 20;
+      if (left < 0) {
+        left = param.point.x + 20;
       }
 
-      top = Math.min(top, container.clientHeight - toolTip.offsetHeight - 10);
+      const timeScaleHeight = chart.timeScale().height();
+      let top = Math.min(y, container.clientHeight - toolTip.offsetHeight - timeScaleHeight - 4);
       top = Math.max(10, top);
 
       toolTip.style.left = left + 'px';

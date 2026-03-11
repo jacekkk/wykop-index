@@ -129,18 +129,29 @@ export function SentimentLineChart({ data }) {
     // Create tooltip element
     const toolTip = document.createElement('div');
     toolTip.style.cssText = `
+      width: auto;
+      white-space: nowrap;
+      height: 300px;
       position: absolute;
       display: none;
-      padding: 8px 12px;
-      background: white;
-      border: 1px solid #d1d5db;
-      border-radius: 4px;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-      font-size: 14px;
-      pointer-events: none;
+      padding: 8px;
+      box-sizing: border-box;
+      font-size: 12px;
+      text-align: left;
       z-index: 1000;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      top: 0;
+      left: 0;
+      pointer-events: none;
+      border-radius: 4px 4px 0 0;
+      border-bottom: none;
+      box-shadow: 0 2px 5px 0 rgba(117, 134, 150, 0.45);
+      font-family: -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     `;
+    toolTip.style.background = 'rgba(255, 255, 255, 0.25)';
+    toolTip.style.color = 'black';
+    toolTip.style.borderColor = '#d1d5db';
     container.appendChild(toolTip);
     tooltipRef.current = toolTip;
 
@@ -150,8 +161,14 @@ export function SentimentLineChart({ data }) {
     });
     chart.priceScale('right').setVisibleRange({ from: 0, to: 100 });
 
-    // Fit content
-    chart.timeScale().fitContent();
+    // Show last 30 days
+    if (sentimentData.length > 0) {
+      const latestTime = sentimentData[sentimentData.length - 1].time;
+      const thirtyDaysAgo = latestTime - 30 * 24 * 60 * 60;
+      chart.timeScale().setVisibleRange({ from: thirtyDaysAgo, to: latestTime });
+    } else {
+      chart.timeScale().fitContent();
+    }
 
     // Add tooltip tracking
     chart.subscribeCrosshairMove((param) => {
@@ -195,19 +212,16 @@ export function SentimentLineChart({ data }) {
       
       toolTip.innerHTML = html;
 
-      const y = param.point.y;
-      let left = param.point.x + 20;
-      let top = y;
-
-      if (left > container.clientWidth - toolTip.offsetWidth - 10) {
-        left = param.point.x - toolTip.offsetWidth - 20;
-      }
-
-      top = Math.min(top, container.clientHeight - toolTip.offsetHeight - 10);
-      top = Math.max(10, top);
+      let left = param.point.x;
+      const timeScaleWidth = chart.timeScale().width();
+      const priceScaleWidth = chart.priceScale('left').width();
+      const halfTooltipWidth = toolTip.offsetWidth / 2;
+      left += priceScaleWidth - halfTooltipWidth;
+      left = Math.min(left, priceScaleWidth + timeScaleWidth - toolTip.offsetWidth);
+      left = Math.max(left, priceScaleWidth);
 
       toolTip.style.left = left + 'px';
-      toolTip.style.top = top + 'px';
+      toolTip.style.top = '0px';
     });
 
     // Handle resize
