@@ -5,6 +5,8 @@ import { cleanJsonResponse, stripQueryParams, parseComment } from './utils.js';
 // Appwrite resource IDs
 const DATABASE_ID = '69617178003ac8ef4fba';
 const REPLIES_COLLECTION = 'replies';
+const SENTIMENT_COLLECTION = 'sentiment';
+const SUBSCRIBERS_COLLECTION = 'subscribers';
 
 export default async ({ req, res, log, error }) => {
   try {
@@ -37,6 +39,7 @@ export default async ({ req, res, log, error }) => {
     - If a question is about the specific stocks or your recommendations, do not provide generic advice. Research the stocks, recent news, and provide a data-driven answer based on that.
     - If you can't access an attachment or URL, say "Nie mogę otworzyć załącznika, ale na podstawie tekstu mogę powiedzieć, że..." and provide an answer based on the text alone.
     - If you can't answer a question or it doesn't warrant a response, ignore it and do not include it in the output.
+    - DO NOT respond to comments that say "@KrachSmieciuchIndex nie wołaj" - these are instructions from users to not be notified about the future updates, so you should ignore them.
     
     CRITICAL: You MUST respond with ONLY raw JSON. DO NOT wrap your response in markdown code blocks. DO NOT add any text before or after the JSON. Your entire response must be valid JSON that can be directly parsed.
     `;
@@ -329,17 +332,14 @@ export default async ({ req, res, log, error }) => {
             })
           });
 
-          log(`Post response status: ${postResponse.status}`);
-          
           if (!postResponse.ok) {
             const errorText = await postResponse.text();
             throw new Error(`Failed to post to Wykop: ${postResponse.status} ${errorText}`);
           }
 
           const postResult = await postResponse.json();
-          log(`Successfully posted to Wykop, entry ID: ${postResult.data.id}`);
+          log(`Successfully posted to Wykop, comment ID: ${postResult.data.id}`);
 
-          
           try {
             log(`Saving reply to database`);
 
@@ -362,7 +362,7 @@ export default async ({ req, res, log, error }) => {
           error(`Failed to process reply for ${replyObj.username}: ${postError.message}`);
       }
     }
-    
+
     // Mark notifications as read
     if (notificationIds.length > 0) {
       log(`Marking ${notificationIds.length} notifications as read...`);
@@ -385,6 +385,104 @@ export default async ({ req, res, log, error }) => {
           error(`Error marking notification ${notificationId} as read: ${markError.message}`);
         }
       }));
+    }
+    
+    // --- SET SUBSCRIBERS SECTION ---
+
+    try {
+      const latestSentiment = await databases.listDocuments(
+        DATABASE_ID,
+        SENTIMENT_COLLECTION,
+        [
+          sdk.Query.orderDesc('$createdAt'),
+          sdk.Query.limit(1)
+        ]
+      );
+
+      const latestEntryId = latestSentiment.documents[0]?.entryId;
+      log(`Latest sentiment entryId: ${latestEntryId}`);
+
+      if (latestEntryId) {
+        const subEntryCommentsResponse = await fetch(`https://wykop.pl/api/v3/entries/${latestEntryId}/comments?page=1&limit=50`, {
+          method: 'GET',
+          headers: {
+            'accept': 'application/json',
+            'Authorization': `Bearer ${wykopToken}`
+          }
+        });
+
+        if (!subEntryCommentsResponse.ok) {
+          throw new Error(`Failed to fetch entry comments: ${subEntryCommentsResponse.status} ${await subEntryCommentsResponse.text()}`);
+        }
+
+        const subEntryCommentsJson = await subEntryCommentsResponse.json();
+        const subEntryComments = subEntryCommentsJson.data || [];
+
+        const subscriptionComment = subEntryComments.find(comment =>
+          comment.author?.username === 'KrachSmieciuchIndex' &&
+          comment.content?.startsWith('Zaplusuj ten komentarz jeżeli chcesz być wołany do przyszłych wpisów')
+        );
+
+        if (subscriptionComment) {
+          const votesResponse = await fetch(`https://wykop.pl/api/v3/entries/${latestEntryId}/comments/${subscriptionComment.id}/votes`, {
+            method: 'GET',
+            headers: {
+              'accept': 'application/json',
+              'Authorization': `Bearer ${wykopToken}`
+            }
+          });
+
+          if (!votesResponse.ok) {
+            throw new Error(`Failed to fetch comment votes: ${votesResponse.status} ${await votesResponse.text()}`);
+          }
+
+          const votesJson = await votesResponse.json();
+          const voters = votesJson.data || [];
+
+          for (const voter of voters) {
+            const voterUsername = voter.username;
+
+            try {
+              try {
+                await databases.getDocument(DATABASE_ID, SUBSCRIBERS_COLLECTION, voterUsername);
+                log(`Subscriber already exists (skipping): ${voterUsername}`);
+              } catch (notFoundError) {
+                await databases.createDocument(
+                  DATABASE_ID,
+                  SUBSCRIBERS_COLLECTION,
+                  voterUsername,
+                  { username: voterUsername }
+                );
+                log(`Added subscriber: ${voterUsername}`);
+              }
+            } catch (subscriberError) {
+              error(`Failed to add subscriber ${voterUsername}: ${subscriberError.message}`);
+            }
+          }
+        } else {
+          log('Subscription comment not found in entry');
+        }
+
+        const unsubscribeComments = subEntryComments.filter(comment =>
+          comment.author.username !== 'KrachSmieciuchIndex' &&
+          /@KrachSmieciuchIndex nie wo[łl]aj/i.test(comment.content)
+        );
+
+        log(`Found ${unsubscribeComments.length} unsubscribe comments`);
+
+        for (const comment of unsubscribeComments) {
+          const unsubUsername = comment.author.username;
+
+          try {
+            await databases.deleteDocument(DATABASE_ID, SUBSCRIBERS_COLLECTION, unsubUsername);
+            log(`Unsubscribed: ${unsubUsername}`);
+          } catch (notFoundError) {
+            log(`Unsubscribe request from non-subscriber: ${unsubUsername}`);
+          }
+        }
+      }
+    } catch (subscribersError) {
+      error(`Failed to process subscribers: ${subscribersError.message}`);
     }
 
     return res.empty();
