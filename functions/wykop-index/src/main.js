@@ -15,6 +15,7 @@ import {
 const DATABASE_ID = '69617178003ac8ef4fba';
 const BUCKET_ID = '6961715000182498a35a';
 const SENTIMENT_COLLECTION = 'sentiment';
+const SUBSCRIBERS_COLLECTION = 'subscribers';
 
 export default async ({ req, res, log, error }) => {
   try {
@@ -461,34 +462,10 @@ export default async ({ req, res, log, error }) => {
       log("Continuing with null imageId");
     }
 
-    // --- SAVE TO DATABASE SECTION ---
-
-    log("Saving to database");
-
-    const dbResult = await databases.createDocument(
-        DATABASE_ID,
-        SENTIMENT_COLLECTION,
-        sdk.ID.unique(),
-        {
-          sentiment: parseInt(sentimentResult.sentiment),
-          summary: sentimentResult.summary,
-          topQuotes: sentimentResult.topQuotes,
-          mostDiscussed: sentimentResult.mostDiscussed,
-          tomekSentiment: tomekSentimentResult.sentiment ? parseInt(tomekSentimentResult.sentiment) : null,
-          tomekSummary: tomekSentimentResult.summary,
-          imageId: imageId,
-          followers: followersCount,
-          entriesLast24h: entriesLast24h,
-          mostEntriesLast24h: JSON.stringify(topEntryUser),
-          mostCommentsLast24h: JSON.stringify(topCommentUser),
-          mostCombinedLast24h: JSON.stringify(topCombinedUser)
-        }
-    );
-
-    log("Database entry added: " + dbResult.$id);
-
     // --- POST TO WYKOP SECTION ---
     
+    let entryId = null;
+
     try {
       // Fetch historical sentiment data from the last 30 days (after saving, so we can exclude the new entry)
       const now = new Date();
@@ -510,7 +487,6 @@ export default async ({ req, res, log, error }) => {
       
       // Get yesterday's sentiment and entry count
       const yesterdayEntries = lastThirtyDaysData.documents.filter(doc => {
-        if (doc.$id === dbResult.$id) return false; // Exclude the just-saved entry to guard against edge cases due to timing
         const docDate = new Date(doc.$createdAt);
         return docDate >= startOfYesterdayUTC && docDate < startOfTodayUTC;
       });
@@ -528,7 +504,6 @@ export default async ({ req, res, log, error }) => {
       const startOfWeekAgoUTC = new Date(startOfTodayUTC.getTime() - 7 * 24 * 60 * 60 * 1000);
       const endOfWeekAgoUTC = new Date(startOfWeekAgoUTC.getTime() + 24 * 60 * 60 * 1000);
       const weekAgoEntries = lastThirtyDaysData.documents.filter(doc => {
-        if (doc.$id === dbResult.$id) return false;
         const docDate = new Date(doc.$createdAt);
         return docDate >= startOfWeekAgoUTC && docDate < endOfWeekAgoUTC;
       });
@@ -560,7 +535,7 @@ export default async ({ req, res, log, error }) => {
       const topQuotes = JSON.parse(sentimentResult.topQuotes);
       const mostDiscussed = JSON.parse(sentimentResult.mostDiscussed);
 
-      const formattedDate = new Date(dbResult.$createdAt).toLocaleString('pl-PL', {
+      const formattedDate = nowUTC.toLocaleString('pl-PL', {
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
@@ -719,10 +694,73 @@ Masz pytanie? Oznacz mnie we wpisie lub komentarzu na #gielda ( ͡° ͜ʖ ͡°)
       }
 
       const postResult = await postResponse.json();
-      log(`Successfully posted to Wykop, entry ID: ${postResult.data.id}`);
+      entryId = postResult.data.id;
+      log(`Successfully posted to Wykop, entry ID: ${entryId}`);
+
+      // Fetch active subscribers
+      const subscribersResult = await databases.listDocuments(
+        DATABASE_ID,
+        SUBSCRIBERS_COLLECTION,
+        [sdk.Query.limit(1000)]
+      );
+
+      const subscriberMentions = subscribersResult.documents.map(doc => `@${doc.$id}`).join(', ');
+      log(`Fetched ${subscribersResult.documents.length} subscribers`);
+
+      // Post a comment under the entry
+      const commentResponse = await fetch(`https://wykop.pl/api/v3/entries/${entryId}/comments`, {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${wykopToken}`
+        },
+        body: JSON.stringify({
+          data: {
+            content: `Zaplusuj ten komentarz jeżeli chcesz być wołany do przyszłych wpisów. Jeżeli nie chcesz już być wołany, dodaj komentarz o treści: "@KrachSmieciuchIndex nie wołaj".\n
+Wołam: ${subscriberMentions}`,
+            adult: false
+          }
+        })
+      });
+
+      if (!commentResponse.ok) {
+        const errorText = await commentResponse.text();
+        error(`Failed to post comment to Wykop: ${commentResponse.status} ${errorText}`);
+      } else {
+        const commentResult = await commentResponse.json();
+        log(`Successfully posted comment, comment ID: ${commentResult.data.id}`);
+      }
     } catch (postError) {
       error(`Failed to post to Wykop: ${postError.message}`);
     }
+
+        // --- SAVE TO DATABASE SECTION ---
+
+    log("Saving to database");
+
+    const dbResult = await databases.createDocument(
+        DATABASE_ID,
+        SENTIMENT_COLLECTION,
+        sdk.ID.unique(),
+        {
+          sentiment: parseInt(sentimentResult.sentiment),
+          summary: sentimentResult.summary,
+          topQuotes: sentimentResult.topQuotes,
+          mostDiscussed: sentimentResult.mostDiscussed,
+          tomekSentiment: tomekSentimentResult.sentiment ? parseInt(tomekSentimentResult.sentiment) : null,
+          tomekSummary: tomekSentimentResult.summary,
+          imageId: imageId,
+          followers: followersCount,
+          entriesLast24h: entriesLast24h,
+          mostEntriesLast24h: JSON.stringify(topEntryUser),
+          mostCommentsLast24h: JSON.stringify(topCommentUser),
+          mostCombinedLast24h: JSON.stringify(topCombinedUser),
+          entryId: entryId ? String(entryId) : null
+        }
+    );
+
+    log("Database entry added: " + dbResult.$id);
 
     return res.empty();
   } catch(err) {
