@@ -33,7 +33,7 @@ export default async ({ req, res, log, error }) => {
       apiKey: process.env.GEMINI_API_KEY,
     });
 
-    let model = 'gemini-3-flash-preview';
+    let model;
     const systemInstruction = `You are a helpful assistant that analyzes sentiment about stock markets on a Polish social media platform.
     The username of an account from which your responses are posted is KrachSmieciuchIndex.
 
@@ -44,12 +44,19 @@ export default async ({ req, res, log, error }) => {
     CRITICAL: You MUST respond with ONLY raw JSON. DO NOT wrap your response in markdown code blocks. DO NOT add any text before or after the JSON. Your entire response must be valid JSON that can be directly parsed.`;
 
     // Retry helper with exponential backoff
-    const retryWithBackoff = async (fn, maxAttempts = 3, delayMs = 30000) => {
+    const maxAttempts = 4;
+
+    const retryWithBackoff = async (fn, delayMs = 30000) => {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          // Change model to gemini-2.5-flash on 3rd attempt
-          if (attempt === 3) {
-            model = 'gemini-2.5-flash';
+          const primaryModel = 'gemini-3-flash-preview';
+          const backupModel = 'gemini-2.5-flash';
+
+          if (attempt === 1) {
+            model = primaryModel;
+            log(`Using ${model}`);
+          } else if (attempt === maxAttempts) {
+            model = backupModel;
             log(`Switching to ${model} for final attempt`);
           }
           return await fn();
@@ -93,7 +100,7 @@ export default async ({ req, res, log, error }) => {
     const polandOffset = new Date(nowPolandStr).getTime() - nowUTC.getTime();
     
     // For Wykop API operations, we work with Poland time since API returns Poland timestamps
-    const hoursToLookBack = 6;
+    const hoursToLookBack = 12;
     const lookBackTime = new Date(nowUTC.getTime() - hoursToLookBack * 60 * 60 * 1000);
     const twentyFourHoursAgo = new Date(nowUTC.getTime() - 24 * 60 * 60 * 1000);
 
@@ -122,7 +129,7 @@ export default async ({ req, res, log, error }) => {
     let oldestEntryTime = null;
     const userEntryCounts = {};
     const userCommentCounts = {};
-    let recentEntries = []; // entries from the last 6h for sentiment analysis
+    let recentEntries = [];
 
     while (shouldContinue) {
       const pageNumbers = Array.from({ length: batchSize }, (_, i) => currentBatchStart + i);
@@ -228,7 +235,7 @@ export default async ({ req, res, log, error }) => {
     Odpowiedz w nastepujacym formacie JSON:
     {
       "sentiment": "liczba od 1 do 100 jako string",
-      "summary": "analiza nastrojow na tagu (max 800 znakow)",
+      "summary": "analiza nastrojow na tagu (max 1000 znakow)",
       "mostDiscussed": [
         {"asset": "nazwa spolki/aktywa", "reasoning": "krotkie uzasadnienie"},
         {"asset": "nazwa spolki/aktywa", "reasoning": "krotkie uzasadnienie"},
@@ -572,7 +579,8 @@ ${tomekSentimentResult.summary && `\n**TomekIndicator®:**${tomekSentimentResult
 🥈 Najwięcej wpisów: ${topEntryUser.username} (${topEntryUser.count})
 🥉 Najwięcej komentarzy: ${topCommentUser.username} (${topCommentUser.count})
 
-👉 [Wykresy](https://wykop-index.appwrite.network/#wykresy)
+👉 [Wykresy](https://wykop-index.appwrite.network/#charts)
+📖 [Słownik](https://wykop.pl/wpis/85341625/gielda-slowniczek-szczurish-grubas-wyleszczanie-mo)
 
 Masz pytanie? Oznacz mnie we wpisie lub komentarzu na #gielda ( ͡° ͜ʖ ͡°)
 
@@ -717,7 +725,7 @@ Masz pytanie? Oznacz mnie we wpisie lub komentarzu na #gielda ( ͡° ͜ʖ ͡°)
         },
         body: JSON.stringify({
           data: {
-            content: `Zaplusuj ten komentarz jeżeli chcesz być wołany do przyszłych wpisów. Jeżeli nie chcesz już być wołany, dodaj komentarz o treści: "@KrachSmieciuchIndex nie wołaj".\n
+            content: `Zaplusuj ten komentarz jeżeli chcesz być wołany do przyszłych wpisów. Jeżeli nie chcesz już być wołany, dodaj komentarz o treści: "@KrachSmieciuchIndex: nie wołaj".\n
 Wołam: ${subscriberMentions}`,
             adult: false
           }
