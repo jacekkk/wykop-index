@@ -465,7 +465,7 @@ export default async ({ req, res, log, error }) => {
 
         const unsubscribeComments = subEntryComments.filter(comment =>
           comment.author.username !== 'KrachSmieciuchIndex' &&
-          /@KrachSmieciuchIndex nie wo[łl]aj/i.test(comment.content)
+          /@KrachSmieciuchIndex: nie wo[łl]aj/i.test(comment.content)
         );
 
         log(`Found ${unsubscribeComments.length} unsubscribe comments`);

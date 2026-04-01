@@ -132,6 +132,7 @@ dist
 # Directory used by Appwrite CLI for local development
 .appwrite
 
+cleanup-storage.js
 test-image.js
 test-notifications.js
 test-output-*.json
