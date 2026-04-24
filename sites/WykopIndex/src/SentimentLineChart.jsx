@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { createChart, BaselineSeries, LineSeries } from 'lightweight-charts';
+import { createChart, BaselineSeries } from 'lightweight-charts';
 import PropTypes from 'prop-types';
 
 export function SentimentLineChart({ data }) {
@@ -89,13 +89,6 @@ export function SentimentLineChart({ data }) {
       priceLineVisible: false,
     });
 
-    // Add Tomek sentiment as a simple line overlay
-    const tomekSeries = chart.addSeries(LineSeries, {
-      color: '#808080',
-      lineWidth: 1,
-      priceLineVisible: false,
-    });
-
     // Transform data
     const sentimentData = data.map(item => {
       const [day, month] = item.date.split('.');
@@ -109,22 +102,7 @@ export function SentimentLineChart({ data }) {
       };
     });
 
-    const tomekData = data
-      .filter(item => item.tomekSentiment !== null)
-      .map(item => {
-        const [day, month] = item.date.split('.');
-        const year = new Date(item.timestamp).getUTCFullYear();
-        const dateObj = new Date(Date.UTC(year, parseInt(month) - 1, parseInt(day)));
-        const time = Math.floor(dateObj.getTime() / 1000);
-        
-        return {
-          time,
-          value: item.tomekSentiment,
-        };
-      });
-
     sentimentSeries.setData(sentimentData);
-    tomekSeries.setData(tomekData);
 
     // Create tooltip element
     const toolTip = document.createElement('div');
@@ -185,9 +163,8 @@ export function SentimentLineChart({ data }) {
       }
 
       const sentimentData = param.seriesData.get(sentimentSeries);
-      const tomekData = param.seriesData.get(tomekSeries);
 
-      if (!sentimentData && !tomekData) {
+      if (!sentimentData) {
         toolTip.style.display = 'none';
         return;
       }
@@ -204,10 +181,6 @@ export function SentimentLineChart({ data }) {
       
       if (sentimentData) {
         html += `<div>Krach & Śmieciuch Index: <span style="font-weight: 500;">${sentimentData.value.toFixed(2)}</span></div>`;
-      }
-      
-      if (tomekData && tomekData.value !== null) {
-        html += `<div>TomekIndicator®: <span style="font-weight: 500;">${tomekData.value.toFixed(2)}</span></div>`;
       }
       
       toolTip.innerHTML = html;
@@ -258,10 +231,6 @@ function createLegend() {
         <div className="w-4 h-0.5 bg-[#4CBB17]"></div>
         <span className="text-[#2D2D31]">Krach & Śmieciuch Index</span>
       </div>
-      <div className="flex items-center gap-2">
-        <div className="w-4 h-0.5 bg-[#808080]"></div>
-        <span className="text-[#2D2D31]">TomekIndicator®</span>
-      </div>
     </div>
   );
 }
@@ -279,7 +248,6 @@ SentimentLineChartWithLegend.propTypes = {
   data: PropTypes.arrayOf(PropTypes.shape({
     date: PropTypes.string.isRequired,
     sentiment: PropTypes.number.isRequired,
-    tomekSentiment: PropTypes.number,
     timestamp: PropTypes.string.isRequired,
   })).isRequired,
 };
@@ -288,7 +256,6 @@ SentimentLineChart.propTypes = {
   data: PropTypes.arrayOf(PropTypes.shape({
     date: PropTypes.string.isRequired,
     sentiment: PropTypes.number.isRequired,
-    tomekSentiment: PropTypes.number,
     timestamp: PropTypes.string.isRequired,
   })).isRequired,
 };

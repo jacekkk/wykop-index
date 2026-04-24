@@ -237,9 +237,9 @@ export default async ({ req, res, log, error }) => {
       "sentiment": "liczba od 1 do 100 jako string",
       "summary": "analiza nastrojow na tagu (max 1000 znakow)",
       "mostDiscussed": [
-        {"asset": "nazwa spolki/aktywa", "reasoning": "krotkie uzasadnienie"},
-        {"asset": "nazwa spolki/aktywa", "reasoning": "krotkie uzasadnienie"},
-        {"asset": "nazwa spolki/aktywa", "reasoning": "krotkie uzasadnienie"}
+        {"asset": "nazwa spolki/aktywa", "reasoning": "krotkie uzasadnienie", "url": "link do wpisu lub komentarza ktory omawia dany asset"},
+        {"asset": "nazwa spolki/aktywa", "reasoning": "krotkie uzasadnienie", "url": "link do wpisu lub komentarza ktory omawia dany asset"},
+        {"asset": "nazwa spolki/aktywa", "reasoning": "krotkie uzasadnienie", "url": "link do wpisu lub komentarza ktory omawia dany asset"}
       ],
       "topQuotes": [
         {"username": "nazwa uzytkownika", "sentiment": "BULLISH/BEARISH/NEUTRALNY", "quote": "krotki cytat", "url": "link do wpisu lub komentarza ktory zawiera cytat"},
@@ -258,7 +258,7 @@ export default async ({ req, res, log, error }) => {
     const sentimentSchema = {
       sentiment: 'string',
       summary: 'string',
-      mostDiscussed: { type: 'array-of-objects', requiredFields: ['asset', 'reasoning'] },
+      mostDiscussed: { type: 'array-of-objects', requiredFields: ['asset', 'reasoning', 'url'] },
       topQuotes: { type: 'array-of-objects', requiredFields: ['username', 'sentiment', 'quote', 'url'] }
     };
 
@@ -304,74 +304,69 @@ export default async ({ req, res, log, error }) => {
 
     // --- TOMEK INDICATOR SECTION ---
 
-    const [tomekResponse1, tomekResponse2] = await Promise.all([
-      fetch('https://wykop.pl/api/v3/profile/users/tom-ek12333/actions?page=1&limit=50', {
-        method: 'GET',
-        headers: {
-          'accept': 'application/json',
-          'Authorization': `Bearer ${wykopToken}`
-        }
-      }),
-      fetch('https://wykop.pl/api/v3/profile/users/tom-ek12333/actions?page=2&limit=50', {
-        method: 'GET',
-        headers: {
-          'accept': 'application/json',
-          'Authorization': `Bearer ${wykopToken}`
-        }
-      })
-    ]);
+    const tomekResponses = await Promise.all(
+      [1, 2, 3, 4].map(page =>
+        fetch(`https://wykop.pl/api/v3/profile/users/tom-ek12333/actions?page=${page}&limit=50`, {
+          method: 'GET',
+          headers: {
+            'accept': 'application/json',
+            'Authorization': `Bearer ${wykopToken}`
+          }
+        })
+      )
+    );
 
-    const [tomekJson1, tomekJson2] = await Promise.all([
-      tomekResponse1.json(),
-      tomekResponse2.json()
-    ]);
+    const tomekJsons = await Promise.all(tomekResponses.map(r => r.json()));
 
-    const allTomekData = [...tomekJson1.data, ...tomekJson2.data];
-    const recentTomekData = allTomekData.filter(entry => {
-      // Wykop API returns Poland time, parse as UTC then subtract Poland offset
-      const entryDate = new Date(entry.created_at.replace(' ', 'T') + 'Z');
-      return entryDate.getTime() - polandOffset >= twentyFourHoursAgo.getTime();
-    });
+    const allTomekData = tomekJsons.flatMap(j => j.data ?? []);
+    // const recentTomekData = allTomekData.filter(entry => {
+    //   // Wykop API returns Poland time, parse as UTC then subtract Poland offset
+    //   const entryDate = new Date(entry.created_at.replace(' ', 'T') + 'Z');
+    //   return entryDate.getTime() - polandOffset >= twentyFourHoursAgo.getTime();
+    // });
 
-    // Log times of Tomek entries in UTC and Poland time
-    if (recentTomekData.length > 0) {
-      const newestTomekTime = recentTomekData[0].created_at;
-      const oldestTomekTime = recentTomekData[recentTomekData.length - 1].created_at;
-      const newestTomekUTC = formatDateTime(new Date(new Date(newestTomekTime.replace(' ', 'T') + 'Z').getTime() - polandOffset));
-      const oldestTomekUTC = formatDateTime(new Date(new Date(oldestTomekTime.replace(' ', 'T') + 'Z').getTime() - polandOffset));
-      log(`Got ${recentTomekData.length} Tomek posts between ${oldestTomekUTC} - ${newestTomekUTC} (Polish time: ${oldestTomekTime} - ${newestTomekTime})`);
-    } else {
-      log('No Tomek posts from the last 24h with #gielda tag');
-    }
+    // // Log times of Tomek entries in UTC and Poland time
+    // if (recentTomekData.length > 0) {
+    //   const newestTomekTime = recentTomekData[0].created_at;
+    //   const oldestTomekTime = recentTomekData[recentTomekData.length - 1].created_at;
+    //   const newestTomekUTC = formatDateTime(new Date(new Date(newestTomekTime.replace(' ', 'T') + 'Z').getTime() - polandOffset));
+    //   const oldestTomekUTC = formatDateTime(new Date(new Date(oldestTomekTime.replace(' ', 'T') + 'Z').getTime() - polandOffset));
+    //   log(`Got ${recentTomekData.length} Tomek posts between ${oldestTomekUTC} - ${newestTomekUTC} (Polish time: ${oldestTomekTime} - ${newestTomekTime})`);
+    // } else {
+    //   log('No Tomek posts from the last 24h with #gielda tag');
+    // }
 
-    const parsedTomekData = parsePosts(recentTomekData);
+    const parsedTomekData = parsePosts(allTomekData);
 
     let tomekSentimentResult;
 
     if (parsedTomekData.length === 0) {
       tomekSentimentResult = {
-        sentiment: null,
-        summary: "Tomek od wczoraj siedzi cicho - albo mamy pompę stulecia i siedzi w norze, albo krach stulecia i siedzi na Bahamach za hajs ze 100-letnich obligacji."
+        quote: null,
+        createdAt: null,
+        url: null
       };
     } else {
-      const tomekPrompt = `Z lekka szydera, ale tez sympatia przeanalizuj najnowsze wpisy uzytkownika tom-ek12333 z tagu #gielda na portalu wykop.pl.
-      Oszacuj jego obecny sentyment w skali 1-100, gdzie 1 to ekstremalnie bearish, a 100 to ekstremalnie bullish.
+      const tomekPrompt = `Wybierz losowy wpis lub komentarz uzytkownika tom-ek12333 z tagu #gielda na portalu wykop.pl.
       
       Odpowiedz w nastepujacym formacie JSON:
       {
-        "sentiment": "liczba od 1 do 100 jako string",
-        "summary": "analiza nastroju Tomka (max 500 znakow) - uzyj cytatow jako uzasadnienia"
+        "quote": "cytat z Tomka (max 500 znakow)",
+        "createdAt": "skopiuj wartosc z pola created_at wpisu lub komentarza",
+        "url": "skopiuj wartosc z pola url wpisu lub komentarza"
       }
-      
+
+            
       WAZNE:
-      - Jezeli wpis lub komentarz zawiera zalacznik (pole photo_url lub embed_url) to uwzglednij tresc zalacznika jako czesc wpisu do analizy sentymentu Tomka.
+      - Cytat ma byc wybrany losowo spośród wszystkich wpisów i komentarzy Tomka z tagu #gielda, bez wzgledu na date publikacji. Nie wybieraj tylko najnowszego wpisu, ani nie wybieraj na podstawie sentymentu - ma to byc czysto losowy wybor spośród wszystkich wpisów.
       - Wszystkie pola w odpowiedzi sa wymagane.
       
       Wpisy: ${JSON.stringify(parsedTomekData)}`;
 
       const tomekSchema = {
-        sentiment: 'string',
-        summary: 'string'
+        quote: 'string',
+        createdAt: 'string',
+        url: 'string'
       };
 
       await retryWithBackoff(async () => {
@@ -406,6 +401,11 @@ export default async ({ req, res, log, error }) => {
         }
       });
     }
+
+    const formattedTomekDate = tomekSentimentResult.createdAt
+      ? new Date(new Date(tomekSentimentResult.createdAt.replace(' ', 'T') + 'Z').getTime() - polandOffset)
+          .toLocaleDateString('pl-PL', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
+      : null;
 
     // --- IMAGE GENERATION SECTION ---
     let imageId = null;
@@ -565,12 +565,12 @@ export default async ({ req, res, log, error }) => {
 ${sentimentResult.summary}
 
 **Najczęściej omawiane:**
-${Array.isArray(mostDiscussed) && mostDiscussed.length > 0 ? mostDiscussed.slice(0, 3).map(topic => `🔥 ${topic.asset}: ${topic.reasoning}`).join('\n') : ''}
+${Array.isArray(mostDiscussed) && mostDiscussed.length > 0 ? mostDiscussed.slice(0, 3).map(topic => `🔥 [${topic.asset}](${topic.url}): ${topic.reasoning}`).join('\n') : ''}
 
 **Topowi analitycy:**
-${Array.isArray(topQuotes) && topQuotes.length > 0 ? topQuotes.slice(0, 3).map(user => `👤 @${user.username} (${user.sentiment}): [_"${user.quote}"_](${user.url})`).join('\n') : ''}
+${Array.isArray(topQuotes) && topQuotes.length > 0 ? topQuotes.slice(0, 3).map(user => `👤 @${user.username} (${user.sentiment}): [_"${user.quote.replace(/_/g, '\\_')}"_](${user.url})`).join('\n') : ''}
 
-${tomekSentimentResult.summary && `\n**TomekIndicator®:**${tomekSentimentResult.sentiment !== null ? ` ${tomekSentimentResult.sentiment}/100` : ''}\n${tomekSentimentResult.summary}`}
+${tomekSentimentResult.quote && `\n**Kroniki Tomka:**\n_${tomekSentimentResult.quote.replace(/_/g, '\\_')}_ ([${formattedTomekDate}](${tomekSentimentResult.url}))\n`}
 
 **Statystyki:**
 👀 Obserwujący tag: ${followersCount} ${followersWeekAgo !== null ? `(tydzień temu: ${followersWeekAgo}; zmiana: ${followersChange})` : ''}
@@ -580,7 +580,6 @@ ${tomekSentimentResult.summary && `\n**TomekIndicator®:**${tomekSentimentResult
 🥉 Najwięcej komentarzy: ${topCommentUser.username} (${topCommentUser.count})
 
 👉 [Wykresy](https://wykop-index.appwrite.network/#charts)
-📖 [Słownik](https://wykop.pl/wpis/85341625/gielda-slowniczek-szczurish-grubas-wyleszczanie-mo)
 
 Masz pytanie? Oznacz mnie we wpisie lub komentarzu na #gielda ( ͡° ͜ʖ ͡°)
 
@@ -715,7 +714,7 @@ Masz pytanie? Oznacz mnie we wpisie lub komentarzu na #gielda ( ͡° ͜ʖ ͡°)
       const subscriberMentions = subscribersResult.documents.map(doc => `@${doc.$id}`).join(', ');
       log(`Fetched ${subscribersResult.documents.length} subscribers`);
 
-      // Post a comment under the entry
+      // Post subscription comment under the entry
       const commentResponse = await fetch(`https://wykop.pl/api/v3/entries/${entryId}/comments`, {
         method: 'POST',
         headers: {
@@ -725,8 +724,7 @@ Masz pytanie? Oznacz mnie we wpisie lub komentarzu na #gielda ( ͡° ͜ʖ ͡°)
         },
         body: JSON.stringify({
           data: {
-            content: `Zaplusuj ten komentarz jeżeli chcesz być wołany do przyszłych wpisów. Jeżeli nie chcesz już być wołany, dodaj komentarz o treści: "@KrachSmieciuchIndex: nie wołaj".\n
-Wołam: ${subscriberMentions}`,
+            content: `Zaplusuj ten komentarz jeżeli chcesz być wołany do przyszłych wpisów. Jeżeli nie chcesz już być wołany, dodaj komentarz o treści: "@KrachSmieciuchIndex: nie wołaj".`,
             adult: false
           }
         })
@@ -734,10 +732,36 @@ Wołam: ${subscriberMentions}`,
 
       if (!commentResponse.ok) {
         const errorText = await commentResponse.text();
-        error(`Failed to post comment to Wykop: ${commentResponse.status} ${errorText}`);
+        error(`Failed to post subscription comment: ${commentResponse.status} ${errorText}`);
       } else {
         const commentResult = await commentResponse.json();
-        log(`Successfully posted comment, comment ID: ${commentResult.data.id}`);
+        log(`Successfully posted subscription comment, comment ID: ${commentResult.data.id}`);
+      }
+
+      // Post subscriber mentions as a separate comment
+      if (subscriberMentions) {
+        const mentionsResponse = await fetch(`https://wykop.pl/api/v3/entries/${entryId}/comments`, {
+          method: 'POST',
+          headers: {
+            'accept': 'application/json',
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${wykopToken}`
+          },
+          body: JSON.stringify({
+            data: {
+              content: `Wołam: ${subscriberMentions}`,
+              adult: false
+            }
+          })
+        });
+
+        if (!mentionsResponse.ok) {
+          const errorText = await mentionsResponse.text();
+          error(`Failed to post mentions comment: ${mentionsResponse.status} ${errorText}`);
+        } else {
+          const mentionsResult = await mentionsResponse.json();
+          log(`Successfully posted mentions comment, comment ID: ${mentionsResult.data.id}`);
+        }
       }
     } catch (postError) {
       error(`Failed to post to Wykop: ${postError.message}`);
@@ -756,8 +780,10 @@ Wołam: ${subscriberMentions}`,
           summary: sentimentResult.summary,
           topQuotes: sentimentResult.topQuotes,
           mostDiscussed: sentimentResult.mostDiscussed,
-          tomekSentiment: tomekSentimentResult.sentiment ? parseInt(tomekSentimentResult.sentiment) : null,
-          tomekSummary: tomekSentimentResult.summary,
+          tomekSentiment: null,
+          tomekQuote: tomekSentimentResult.quote
+            ? JSON.stringify({ quote: tomekSentimentResult.quote, date: formattedTomekDate, url: tomekSentimentResult.url })
+            : null,
           imageId: imageId,
           followers: followersCount,
           entriesLast24h: entriesLast24h,
