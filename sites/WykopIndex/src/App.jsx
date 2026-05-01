@@ -6,6 +6,7 @@ import { SentimentCandleChart } from './SentimentCandleChart';
 import { SentimentLineChartWithLegend } from './SentimentLineChart';
 import { EntriesChart } from './EntriesChart';
 import { FollowersChart } from './FollowersChart';
+import { EarningsPage } from './EarningsPage';
 
 // Constants
 const DATABASE_ID = '69617178003ac8ef4fba';
@@ -30,7 +31,7 @@ const formatUTCDate = (date) => {
   });
 };
 
-const VALID_PAGES = ['home', 'charts', 'answers'];
+const VALID_PAGES = ['home', 'charts', 'answers', 'earnings'];
 const getPageFromHash = () => {
   const hash = window.location.hash.replace('#', '');
   return VALID_PAGES.includes(hash) ? hash : 'home';
@@ -104,7 +105,6 @@ function App() {
           const chartData = historicalResponse.documents.map(doc => ({
             date: formatUTCDate(doc.$createdAt),
             sentiment: doc.sentiment,
-            tomekSentiment: doc.tomekSentiment,
             timestamp: doc.$createdAt,
             createdAt: new Date(doc.$createdAt)
           }));
@@ -118,23 +118,16 @@ function App() {
               acc[item.date] = {
                 date: item.date,
                 sentiments: [],
-                tomekSentiments: [],
                 timestamp: item.timestamp
               };
             }
             acc[item.date].sentiments.push(item.sentiment);
-            if (item.tomekSentiment !== null) {
-              acc[item.date].tomekSentiments.push(item.tomekSentiment);
-            }
             return acc;
           }, {});
           
           const averagedData = Object.values(groupedByDate).map(group => ({
             date: group.date,
             sentiment: Math.round(group.sentiments.reduce((sum, val) => sum + val, 0) / group.sentiments.length),
-            tomekSentiment: group.tomekSentiments.length > 0 
-              ? Math.round(group.tomekSentiments.reduce((sum, val) => sum + val, 0) / group.tomekSentiments.length)
-              : null,
             timestamp: group.timestamp
           }));
 
@@ -263,6 +256,7 @@ function App() {
             { id: 'home', label: 'Strona główna' },
             { id: 'charts', label: 'Wykresy' },
             { id: 'answers', label: 'Odpowiedzi' },
+            { id: 'earnings', label: 'Wyniki kwartalne' },
           ].map(({ id, label }) => (
             <a
               key={id}
@@ -394,7 +388,7 @@ function App() {
                           <div key={index} className="flex items-start gap-2">
                             <span className="text-[#2D2D31]">🔥</span>
                             <div className="flex-1">
-                              <span className="text-[#2D2D31] font-medium">{topic.asset}</span>
+                              <a href={topic.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800 font-medium">{topic.asset}</a>
                               <span className="text-[#2D2D31] font-medium">: {topic.reasoning}</span>
                             </div>
                           </div>
@@ -423,39 +417,26 @@ function App() {
                     </div>
                   )}
 
-                  {item.tomekSummary && (
-                    <div className="mt-6" id="tomekindicator">
+                  {item.tomekQuote && (() => {
+                    const tomek = JSON.parse(item.tomekQuote);
+                    return tomek.quote ? (
+                      <div className="mt-6" id="tomekindicator">
                         <h3 className="text-lg font-bold text-[#808080] mb-1">
-                          <a href="#tomekindicator" className="hover:underline">TomekIndicator®</a>
+                          <a href="#tomekindicator" className="hover:underline">Kroniki Tomka</a>
                         </h3>
-                        <div className="space-y-2">
-                          <div>
-                            {item.tomekSentiment !== null && (
-                              <div className="flex items-center gap-3 mb-2">
-                                <div 
-                                  className="text-2xl font-bold"
-                                  style={{
-                                    color: '#808080'
-                                  }}
-                                >
-                                  {item.tomekSentiment}
-                                </div>
-                                <div className="h-2 flex-1 bg-gray-200 rounded-full overflow-hidden">
-                                  <div 
-                                    className="h-full"
-                                    style={{ 
-                                      width: `${item.tomekSentiment}%`,
-                                      backgroundColor: '#808080'
-                                    }}
-                                  ></div>
-                                </div>
-                              </div>
-                            )}
-                            <p className="text-[#2D2D31] font-medium text-sm">{item.tomekSummary}</p>
-                          </div>
-                        </div>
-                    </div>
-                  )}
+                        <p className="text-[#2D2D31] font-medium text-sm italic">
+                          &ldquo;{tomek.quote}&rdquo;
+                          {tomek.date && (
+                            <span className="not-italic text-[#97979B] ml-1">
+                              ({tomek.url
+                                ? <a href={tomek.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">{tomek.date}</a>
+                                : tomek.date})
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                    ) : null;
+                  })()}
 
                   {/* Statistics Section */}
                   {(item.followers || item.entriesLast24h || item.mostEntriesLast24h || item.mostCommentsLast24h || item.mostCombinedLast24h) && (
@@ -563,7 +544,7 @@ function App() {
             <div className="space-y-6">
               {chartData.sentiment.length > 0 && (
                 <div>
-                  <h4 className="text-base font-semibold text-[#2D2D31] mb-2">Krach & Śmieciuch Index + TomekIndicator®</h4>
+                  <h4 className="text-base font-semibold text-[#2D2D31] mb-2">Krach & Śmieciuch Index</h4>
                   <SentimentLineChartWithLegend data={chartData.sentiment} />
                 </div>
               )}
@@ -589,6 +570,9 @@ function App() {
           )}
         </section>
       )}
+
+      {/* Earnings Page */}
+      {currentPage === 'earnings' && <EarningsPage />}
 
       {/* Answers Page */}
       {currentPage === 'answers' && (

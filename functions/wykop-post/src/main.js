@@ -1,12 +1,13 @@
 import * as sdk from 'node-appwrite';
 import { GoogleGenAI } from '@google/genai';
-import { cleanJsonResponse, stripQueryParams, parseComment } from './utils.js';
+import { cleanJsonResponse, stripQueryParams, parseComment, formatEps, formatRevenue } from './utils.js';
 
 // Appwrite resource IDs
 const DATABASE_ID = '69617178003ac8ef4fba';
 const REPLIES_COLLECTION = 'replies';
 const SENTIMENT_COLLECTION = 'sentiment';
 const SUBSCRIBERS_COLLECTION = 'subscribers';
+const EARNINGS_COLLECTION = 'earnings';
 
 export default async ({ req, res, log, error }) => {
   try {
@@ -138,6 +139,10 @@ export default async ({ req, res, log, error }) => {
       })
     ]);
 
+    if (!notificationsResponse1.ok || !notificationsResponse2.ok) {
+      throw new Error(`Wykop notifications fetch failed: ${notificationsResponse1.status} / ${notificationsResponse2.status}`);
+    }
+
     const [notificationsJson1, notificationsJson2] = await Promise.all([
       notificationsResponse1.json(),
       notificationsResponse2.json()
@@ -254,7 +259,7 @@ export default async ({ req, res, log, error }) => {
       
       Wpisy: ${JSON.stringify(parsedNotifications)}`;
 
-      const mentionsSchema = { type: 'array-of-objects', requiredFields: ['postId', 'username', 'url', 'post', 'reply'] };
+      const mentionsSchema = { requiredFields: ['postId', 'username', 'url', 'post', 'reply'] };
 
       await retryWithBackoff(async (tools) => {
         log(`Tools enabled: ${JSON.stringify(tools.map(t => Object.keys(t)[0]))}`);
@@ -313,7 +318,7 @@ export default async ({ req, res, log, error }) => {
 
     for (const replyObj of mentionsResult) {
       try {
-        log(`Posting a reply in entry ID ${replyObj.postId} for user ${replyObj.username}`);
+          log(`Posting a reply in entry ID ${replyObj.postId} for user ${replyObj.username}`);
 
           const postContent = `@${replyObj.username} ${replyObj.reply}`;
 
@@ -483,6 +488,364 @@ export default async ({ req, res, log, error }) => {
       }
     } catch (subscribersError) {
       error(`Failed to process subscribers: ${subscribersError.message}`);
+    }
+
+    // --- EARNINGS CALENDAR SECTION ---
+
+    try {
+      // Use ET date to identify the trading day — US market close is 16:30 ET.
+      // The date string is also used as the Nasdaq API parameter, so it must reflect the ET calendar day.
+      const etFormatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/New_York',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false
+      });
+      const etFormatted = etFormatter.format(nowUTC); // "YYYY-MM-DD, HH:mm"
+      const [todayET, etTime] = etFormatted.split(', ');
+      const [etHour, etMinute] = etTime.split(':').map(Number);
+
+      const minutesSinceClose = (etHour * 60 + etMinute) - (16 * 60 + 30);
+      const isAfterClose = minutesSinceClose >= 0;
+      const isWithinRetryWindow = isAfterClose && minutesSinceClose < 60;
+
+      // Preview window: 9:00–10:59 UTC (5:00–6:59 ET in EDT)
+      const utcHour = nowUTC.getUTCHours();
+      const isPreviewTime = utcHour >= 9 && utcHour < 11;
+
+      log(`ET date: ${todayET}, ET time: ${etHour}:${String(etMinute).padStart(2, '0')}, isAfterClose: ${isAfterClose}, minutesSinceClose: ${minutesSinceClose}, isWithinRetryWindow: ${isWithinRetryWindow}, isPreviewTime: ${isPreviewTime}`);
+
+      // Align the DB query boundary to midnight of the ET trading day, not UTC midnight.
+      // Without this, after UTC midnight (still same ET day), the query finds no record and creates a duplicate.
+      const minutesSinceMidnightET = etHour * 60 + etMinute;
+      const startOfTradingDayUTC = new Date(nowUTC.getTime() - minutesSinceMidnightET * 60 * 1000);
+
+      // Helper: fetch today's top-10 earnings by market cap from Nasdaq, then enrich with Finnhub
+      const fetchEarnings = async () => {
+          // Step 1: Nasdaq — get all companies reporting today, filter and rank by market cap
+          const nasdaqResponse = await fetch(
+            `https://api.nasdaq.com/api/calendar/earnings?date=${todayET}`,
+            { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' } }
+          );
+          if (!nasdaqResponse.ok) {
+            throw new Error(`Nasdaq earnings fetch failed: ${nasdaqResponse.status} ${await nasdaqResponse.text()}`);
+          }
+          const nasdaqJson = await nasdaqResponse.json();
+          const rows = nasdaqJson?.data?.rows ?? [];
+          const parseNum = (str) => {
+            if (!str || str === '-' || str === 'N/A') return null;
+            const s = String(str).replace(/[$,]/g, '');
+            const negative = s.startsWith('(') && s.endsWith(')');
+            const n = parseFloat(negative ? s.slice(1, -1) : s);
+            return isNaN(n) ? null : (negative ? -n : n);
+          };
+          const candidates = rows
+            .map(r => ({ symbol: r.symbol, name: r.name || null, marketCap: parseNum(r.marketCap), time: r.time || null }))
+            .filter(r => r.marketCap != null && r.marketCap >= 10_000_000_000)
+            .sort((a, b) => b.marketCap - a.marketCap)
+            .slice(0, 25); // cap Finnhub calls well within the 60/min free tier limit
+
+          if (candidates.length === 0) return [];
+
+          // Step 2: Finnhub — fetch EPS data for each company in parallel
+          const finnhubResults = await Promise.all(
+            candidates.map(async (company) => {
+              try {
+                const url = `https://finnhub.io/api/v1/calendar/earnings?from=${todayET}&to=${todayET}&symbol=${company.symbol}&token=${process.env.FINNHUB_API_KEY}`;
+                const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+                if (!res.ok) return null;
+                const json = await res.json();
+                return json?.earningsCalendar?.[0] ?? null;
+              } catch {
+                return null;
+              }
+            })
+          );
+
+          return candidates.map((company, i) => {
+            const fh = finnhubResults[i];
+            const epsActual = fh?.epsActual ?? null;
+            const epsEstimated = fh?.epsEstimate ?? null;
+            const surprise = (epsActual !== null && epsEstimated !== null && epsEstimated !== 0)
+              ? (epsActual - epsEstimated) / Math.abs(epsEstimated) * 100
+              : null;
+            return {
+              symbol: company.symbol,
+              name: company.name,
+              date: todayET,
+              marketCap: company.marketCap,
+              time: company.time,
+              epsEstimated,
+              epsActual,
+              surprise,
+              revenueActual: fh?.revenueActual ?? null,
+              revenueEstimate: fh?.revenueEstimate ?? null,
+            };
+          }).filter(r => r.epsEstimated != null);
+      };
+
+      // --- MORNING PREVIEW (9:00–10:59 UTC) ---
+      if (isPreviewTime) {
+        const existingDocs = (await databases.listDocuments(
+          DATABASE_ID,
+          EARNINGS_COLLECTION,
+          [
+            sdk.Query.greaterThanEqual('$createdAt', startOfTradingDayUTC.toISOString()),
+            sdk.Query.orderDesc('$createdAt'),
+            sdk.Query.limit(1)
+          ]
+        )).documents;
+
+        if (existingDocs.length > 0) {
+          log(`Preview already handled for ${todayET}, skipping.`);
+        } else {
+          log(`Posting earnings preview for ${todayET}...`);
+          const earningsData = await fetchEarnings();
+
+          if (earningsData.length === 0) {
+            log(`No earnings data for preview on ${todayET}`);
+          } else {
+            const top10 = earningsData.slice(0, 10);
+            await databases.createDocument(
+              DATABASE_ID,
+              EARNINGS_COLLECTION,
+              sdk.ID.unique(),
+              { earnings: JSON.stringify(top10), posted: false }
+            );
+            log(`Saved earnings record for ${todayET} with ${top10.length} entries (${earningsData.length} total candidates)`);
+
+            const previewLines = top10.map(entry => {
+              const name = entry.name ? ` (${entry.name})` : '';
+              const timing = entry.time === 'time-pre-market' ? '🌅'
+                : entry.time === 'time-after-hours' ? '🌙'
+                : '';
+              return `[${entry.symbol}](https://finance.yahoo.com/quote/${entry.symbol})${name}${timing ? ' — ' + timing : ''}`;
+            });
+
+            const formattedDate = nowUTC.toLocaleString('pl-PL', {
+              year: 'numeric', month: '2-digit', day: '2-digit',
+              timeZone: 'Europe/Warsaw'
+            });
+
+            const previewContent = `**Dzisiaj raportują - ${formattedDate}** (top 10 według kapitalizacji, > $10B, USA)
+🌅  = przed otwarciem
+🌙 = po zamknięciu
+
+${previewLines.join('\n')}
+
+Wyniki pojawią się na tagu po zamknięciu sesji.
+Wszystkie wyniki z ostatnich 90 dni dostępne [na stronie](https://wykop-index.appwrite.network/#earnings).
+
+#gielda #wykopindex #krachsmieciuchindex`;
+
+            const previewResponse = await fetch('https://wykop.pl/api/v3/entries', {
+              method: 'POST',
+              headers: {
+                'accept': 'application/json',
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${wykopToken}`
+              },
+              body: JSON.stringify({ data: { content: previewContent, adult: false } })
+            });
+
+            if (!previewResponse.ok) {
+              const errorText = await previewResponse.text();
+              log(`Failed to post preview: ${previewResponse.status} ${errorText}`);
+            } else {
+              log(`Preview posted for ${todayET}`);
+            }
+          }
+        }
+      }
+
+      // --- EVENING RESULTS (after 16:30 ET) ---
+      if (isAfterClose) {
+        const existingDocs = (await databases.listDocuments(
+          DATABASE_ID,
+          EARNINGS_COLLECTION,
+          [
+            sdk.Query.greaterThanEqual('$createdAt', startOfTradingDayUTC.toISOString()),
+            sdk.Query.orderDesc('$createdAt'),
+            sdk.Query.limit(1)
+          ]
+        )).documents;
+
+        let currentDoc = existingDocs[0] || null;
+
+        if (!currentDoc) {
+          // No morning preview ran — fetch now
+          log(`No earnings record for ${todayET}, fetching from Nasdaq + Finnhub...`);
+          const earningsData = await fetchEarnings();
+
+          if (earningsData.length === 0) {
+            log(`No earnings data returned from Nasdaq + Finnhub for ${todayET}`);
+          } else {
+            const top10fallback = earningsData.slice(0, 10);
+            currentDoc = await databases.createDocument(
+              DATABASE_ID,
+              EARNINGS_COLLECTION,
+              sdk.ID.unique(),
+              { earnings: JSON.stringify(top10fallback), posted: false }
+            );
+            log(`Saved earnings record for ${todayET} with ${top10fallback.length} entries`);
+          }
+        }
+
+        if (currentDoc) {
+          if (currentDoc.posted === true) {
+            log(`Earnings for ${todayET} already posted, skipping.`);
+          } else {
+            let currentData = JSON.parse(currentDoc.earnings);
+            const hasActualEPS = (entry) => entry.epsActual !== null;
+
+            if (currentData.some(entry => !hasActualEPS(entry)) && isWithinRetryWindow) {
+              log(`Some entries missing EPS actuals, re-fetching from Nasdaq + Finnhub...`);
+              const freshData = await fetchEarnings();
+              const freshMap = Object.fromEntries(freshData.map(e => [e.symbol, e]));
+
+              currentData = currentData.map(entry => {
+                const fresh = freshMap[entry.symbol];
+                if (!fresh) return entry;
+                return {
+                  ...entry,
+                  epsActual: fresh.epsActual,
+                  epsEstimated: fresh.epsEstimated,
+                  surprise: fresh.surprise,
+                  revenueActual: fresh.revenueActual,
+                  revenueEstimate: fresh.revenueEstimate,
+                };
+              });
+
+              await databases.updateDocument(DATABASE_ID, EARNINGS_COLLECTION, currentDoc.$id, {
+                earnings: JSON.stringify(currentData)
+              });
+            }
+
+            const originalSymbols = new Set(currentData.map(e => e.symbol));
+            const completeOriginals = currentData.filter(hasActualEPS);
+            const missingCount = currentData.length - completeOriginals.length;
+
+            if (completeOriginals.length === 0) {
+              if (isWithinRetryWindow) {
+                log(`Entries still missing EPS actuals for ${todayET}, will retry within 1h window.`);
+              } else {
+                log(`Retry window closed and no entries with EPS actuals for ${todayET}, skipping post.`);
+              }
+            } else if (missingCount > 0 && isWithinRetryWindow) {
+              log(`Waiting for retry window to finish before filling gaps (${completeOriginals.length}/${currentData.length} complete).`);
+            } else {
+              // Retry window closed or all data complete — fill any gaps with next-ranked substitutes then post
+              let postableData = completeOriginals;
+              if (missingCount > 0) {
+                const freshData = await fetchEarnings();
+                const substitutes = freshData
+                  .filter(e => !originalSymbols.has(e.symbol) && hasActualEPS(e))
+                  .slice(0, missingCount);
+                postableData = [...completeOriginals, ...substitutes];
+                if (substitutes.length > 0) {
+                  log(`Replaced ${missingCount} incomplete entries with ${substitutes.length} substitutes: ${substitutes.map(e => e.symbol).join(', ')}`);
+                }
+              }
+              postableData.sort((a, b) => b.marketCap - a.marketCap);
+              const beat = (actual, est) => actual != null && est != null ? (actual >= est ? '✅' : '❌') : '';
+              const lines = postableData.map(entry => {
+                const label = `[${entry.symbol}](https://finance.yahoo.com/quote/${entry.symbol})${entry.name ? ` (${entry.name})` : ''}`;
+                const surpriseStr = entry.surprise != null
+                  ? (entry.surprise >= 0 ? '+' : '') + entry.surprise.toFixed(2) + '%'
+                  : '';
+                const eps = `EPS **${formatEps(entry.epsActual)}** ${beat(entry.epsActual, entry.epsEstimated)} (est. ${formatEps(entry.epsEstimated)})${surpriseStr ? ' ' + surpriseStr : ''}`;
+                const revActual = formatRevenue(entry.revenueActual);
+                const revEstimate = formatRevenue(entry.revenueEstimate);
+                const revSurprise = (entry.revenueActual !== null && entry.revenueEstimate !== null && entry.revenueEstimate !== 0)
+                  ? (entry.revenueActual - entry.revenueEstimate) / Math.abs(entry.revenueEstimate) * 100
+                  : null;
+                const revSurpriseStr = revSurprise != null
+                  ? (revSurprise >= 0 ? '+' : '') + revSurprise.toFixed(2) + '%'
+                  : '';
+                const rev = revActual != null
+                  ? `Rev. **${revActual}** ${beat(entry.revenueActual, entry.revenueEstimate)} (est. ${revEstimate ?? 'N/A'})${revSurpriseStr ? ' ' + revSurpriseStr : ''}`
+                  : null;
+                return `${label}\n${eps}${rev ? '\n' + rev : ''}`;
+              });
+
+              const formattedDate = nowUTC.toLocaleString('pl-PL', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                timeZone: 'Europe/Warsaw'
+              });
+
+              const postContent = `**Wyniki kwartalne - ${formattedDate}**
+Wszystkie wyniki z ostatnich 90 dni dostępne [na stronie](https://wykop-index.appwrite.network/#earnings).
+
+${lines.join('\n\n')}
+
+#gielda #wykopindex #krachsmieciuchindex`;
+
+              log(`Posting earnings results for ${postableData.length} companies...`);
+
+              // Create survey
+              let surveyId = null;
+              try {
+                const surveyResponse = await fetch('https://wykop.pl/api/v3/entries/survey', {
+                  method: 'POST',
+                  headers: {
+                    'accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${wykopToken}`
+                  },
+                  body: JSON.stringify({
+                    data: {
+                      question: 'Czy igrzyska śmierci były dziś dla ciebie łaskawe?',
+                      answers: ['Tak, jest w pyte', 'Nie, isover', 'Moje śmieciuchy miały dzisiaj wolne']
+                    }
+                  })
+                });
+                if (surveyResponse.ok) {
+                  const surveyResult = await surveyResponse.json();
+                  surveyId = surveyResult.data.survey_id;
+                  log(`Created survey, ID: ${surveyId}`);
+                } else {
+                  const errorText = await surveyResponse.text();
+                  error(`Failed to create survey: ${surveyResponse.status} ${errorText}`);
+                }
+              } catch (surveyError) {
+                error(`Error creating survey: ${surveyError.message}`);
+              }
+
+              // Post earnings entry
+              const earningsPostBody = { content: postContent, adult: false };
+              if (surveyId) earningsPostBody.survey = surveyId;
+
+              const earningsPostResponse = await fetch('https://wykop.pl/api/v3/entries', {
+                method: 'POST',
+                headers: {
+                  'accept': 'application/json',
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${wykopToken}`
+                },
+                body: JSON.stringify({ data: earningsPostBody })
+              });
+
+              if (!earningsPostResponse.ok) {
+                const errorText = await earningsPostResponse.text();
+                throw new Error(`Failed to post earnings to Wykop: ${earningsPostResponse.status} ${errorText}`);
+              }
+
+              const earningsPostResult = await earningsPostResponse.json();
+              const earningsEntryId = earningsPostResult.data.id;
+              log(`Successfully posted earnings results, entry ID: ${earningsEntryId}`);
+
+              await databases.updateDocument(DATABASE_ID, EARNINGS_COLLECTION, currentDoc.$id, {
+                earnings: JSON.stringify(postableData),
+                posted: true
+              });
+              log(`Marked earnings record as posted.`);
+            }
+          }
+        }
+      }
+    } catch (earningsError) {
+      error(`Earnings calendar error: ${earningsError.message}`);
     }
 
     return res.empty();

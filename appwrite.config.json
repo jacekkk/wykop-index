@@ -69,7 +69,8 @@
             "logging": true,
             "runtime": "node-22",
             "scopes": [
-                "documents.write"
+                "documents.write",
+                "documents.read"
             ],
             "events": [],
             "schedule": "*/5 * * * *",
@@ -161,6 +162,15 @@
                 },
                 {
                     "key": "tomekSummary",
+                    "type": "string",
+                    "required": false,
+                    "array": false,
+                    "size": 1000,
+                    "default": null,
+                    "encrypt": false
+                },
+                {
+                    "key": "tomekQuote",
                     "type": "string",
                     "required": false,
                     "array": false,
@@ -299,6 +309,35 @@
                     "size": 100,
                     "default": null,
                     "encrypt": false
+                }
+            ],
+            "indexes": []
+        },
+        {
+            "$id": "earnings",
+            "$permissions": [
+                "read(\"any\")"
+            ],
+            "databaseId": "69617178003ac8ef4fba",
+            "name": "earnings",
+            "enabled": true,
+            "rowSecurity": false,
+            "columns": [
+                {
+                    "key": "earnings",
+                    "type": "string",
+                    "required": true,
+                    "array": false,
+                    "size": 65536,
+                    "default": null,
+                    "encrypt": false
+                },
+                {
+                    "key": "posted",
+                    "type": "boolean",
+                    "required": false,
+                    "array": false,
+                    "default": false
                 }
             ],
             "indexes": []
