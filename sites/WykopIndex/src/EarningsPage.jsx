@@ -124,8 +124,6 @@ export function EarningsPage() {
                 <th className="text-right px-3 py-2 font-semibold text-[#97979B] whitespace-nowrap">EPS est.</th>
                 <th className="text-right px-3 py-2 font-semibold text-[#97979B] whitespace-nowrap">Niespodzianka</th>
                 <th className="text-right px-3 py-2 font-semibold text-[#97979B] whitespace-nowrap">Przychody</th>
-                <th className="text-right px-3 py-2 font-semibold text-[#97979B] whitespace-nowrap">Przych. est.</th>
-                <th className="text-right px-3 py-2 font-semibold text-[#97979B] whitespace-nowrap">Niespodzianka</th>
               </tr>
             </thead>
             <tbody>
@@ -137,15 +135,6 @@ export function EarningsPage() {
                   ? (row.surprise >= 0 ? '+' : '') + Number(row.surprise).toFixed(2) + '%'
                   : null;
                 const revActual = formatRevenue(row.revenueActual);
-                const revEstimate = formatRevenue(row.revenueEstimate);
-                const revBeat = row.revenueActual != null && row.revenueEstimate != null
-                  ? row.revenueActual >= row.revenueEstimate : null;
-                const revSurprise = (row.revenueActual != null && row.revenueEstimate != null && row.revenueEstimate !== 0)
-                  ? (row.revenueActual - row.revenueEstimate) / Math.abs(row.revenueEstimate) * 100
-                  : null;
-                const revSurpriseStr = revSurprise != null
-                  ? (revSurprise >= 0 ? '+' : '') + revSurprise.toFixed(2) + '%'
-                  : null;
 
                 return (
                   <tr
@@ -177,23 +166,8 @@ export function EarningsPage() {
                     </td>
                     <td className="px-3 py-2 text-right font-semibold text-[#2D2D31] whitespace-nowrap">
                       {revActual != null ? (
-                        <span>
-                          {revActual}
-                          {revBeat !== null && (
-                            <span className="ml-1">{revBeat ? '✅' : '❌'}</span>
-                          )}
-                        </span>
+                        <span>{revActual}</span>
                       ) : <span className="text-[#97979B] font-normal">—</span>}
-                    </td>
-                    <td className="px-3 py-2 text-right text-[#97979B] whitespace-nowrap">
-                      {revEstimate ?? '—'}
-                    </td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap">
-                      {revSurpriseStr ? (
-                        <span className={`font-semibold ${revSurprise >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {revSurpriseStr}
-                        </span>
-                      ) : <span className="text-[#97979B]">—</span>}
                     </td>
                   </tr>
                 );

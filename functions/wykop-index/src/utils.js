@@ -69,13 +69,6 @@ export const formatDateTime = (date) => {
 };
 
 /**
- * Strip query parameters from a URL string.
- * @param {string|null|undefined} url
- * @returns {string|null}
- */
-export const stripQueryParams = (url) => url ? url.split('?')[0] : null;
-
-/**
  * Parse a raw Wykop comment object into a flat structure.
  * @param {object} comment
  * @param {number|string} entryId
@@ -88,8 +81,8 @@ export const parseComment = (comment, entryId) => ({
   created_at: comment.created_at,
   votes: comment.votes.up,
   content: comment.content,
-  photo_url: stripQueryParams(comment.media?.photo?.url),
-  embed_url: stripQueryParams(comment.media?.embed?.url),
+  photo_url: comment.media?.photo?.url || null,
+  embed_url: comment.media?.embed?.url || null,
 });
 
 /**
@@ -105,8 +98,8 @@ export const parsePosts = (posts) => posts.map(entry => ({
   votes: entry.votes.up,
   content: entry.content,
   comments: entry.comments?.items?.map(comment => parseComment(comment, entry.id)),
-  photo_url: stripQueryParams(entry.media?.photo?.url),
-  embed_url: stripQueryParams(entry.media?.embed?.url),
+  photo_url: entry.media?.photo?.url || null,
+  embed_url: entry.media?.embed?.url || null,
 }));
 
 /**

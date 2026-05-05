@@ -417,20 +417,21 @@ function App() {
                     </div>
                   )}
 
-                  {item.tomekQuote && (() => {
-                    const tomek = JSON.parse(item.tomekQuote);
-                    return tomek.quote ? (
+                  {item.tomekAnalysis && (() => {
+                    const tomek = JSON.parse(item.tomekAnalysis);
+                    const text = tomek.analysis;
+                    return text ? (
                       <div className="mt-6" id="tomekindicator">
                         <h3 className="text-lg font-bold text-[#808080] mb-1">
-                          <a href="#tomekindicator" className="hover:underline">Kroniki Tomka</a>
+                          <a href="#tomekindicator" className="hover:underline">Tomkowe Kreski</a>
                         </h3>
-                        <p className="text-[#2D2D31] font-medium text-sm italic">
-                          &ldquo;{tomek.quote}&rdquo;
-                          {tomek.date && (
-                            <span className="not-italic text-[#97979B] ml-1">
-                              ({tomek.url
-                                ? <a href={tomek.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">{tomek.date}</a>
-                                : tomek.date})
+                        <p className="text-[#2D2D31] font-medium text-sm">
+                          {text}
+                          {tomek.videoUrl && (
+                            <span className="text-[#97979B] ml-1">
+                              (<a href={tomek.videoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">
+                                {tomek.videoTitle ?? 'film'}
+                              </a>)
                             </span>
                           )}
                         </p>
