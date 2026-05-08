@@ -124,15 +124,7 @@
                     "max": 100,
                     "default": null
                 },
-                {
-                    "key": "tomekSentiment",
-                    "type": "integer",
-                    "required": false,
-                    "array": false,
-                    "min": 1,
-                    "max": 100,
-                    "default": null
-                },
+
                 {
                     "key": "summary",
                     "type": "string",
@@ -161,20 +153,11 @@
                     "encrypt": false
                 },
                 {
-                    "key": "tomekSummary",
+                    "key": "tomekAnalysis",
                     "type": "string",
                     "required": false,
                     "array": false,
-                    "size": 1000,
-                    "default": null,
-                    "encrypt": false
-                },
-                {
-                    "key": "tomekQuote",
-                    "type": "string",
-                    "required": false,
-                    "array": false,
-                    "size": 1000,
+                    "size": 2000,
                     "default": null,
                     "encrypt": false
                 },

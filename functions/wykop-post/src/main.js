@@ -1,6 +1,6 @@
 import * as sdk from 'node-appwrite';
 import { GoogleGenAI } from '@google/genai';
-import { cleanJsonResponse, stripQueryParams, parseComment, formatEps, formatRevenue } from './utils.js';
+import { cleanJsonResponse, parseComment, formatEps, formatRevenue } from './utils.js';
 
 // Appwrite resource IDs
 const DATABASE_ID = '69617178003ac8ef4fba';
@@ -95,6 +95,133 @@ export default async ({ req, res, log, error }) => {
     const nowPolandStr = nowUTC.toLocaleString('en-US', { timeZone: 'Europe/Warsaw' });
     const polandOffset = new Date(nowPolandStr).getTime() - nowUTC.getTime();
     const oneHourAgo = new Date(nowUTC.getTime() - 60 * 60 * 1000);
+
+    const supportedImageMimeTypes = new Set([
+      'image/png',
+      'image/jpeg',
+      'image/webp',
+      'image/heic',
+      'image/heif',
+    ]);
+
+    const isYouTubeUrl = (url) => {
+      if (!url) return false;
+      try {
+        const { hostname } = new URL(url);
+        const host = hostname.toLowerCase();
+        return (
+          host === 'youtu.be' ||
+          host.endsWith('.youtu.be') ||
+          host === 'youtube.com' ||
+          host.endsWith('.youtube.com') ||
+          host === 'youtube-nocookie.com' ||
+          host.endsWith('.youtube-nocookie.com')
+        );
+      } catch {
+        return false;
+      }
+    };
+
+    const buildMediaAttachmentParts = async (
+      notifications,
+      maxImages = 8,
+      maxTotalBytes = 18 * 1024 * 1024,
+      maxYouTubeEmbeds = 4
+    ) => {
+      const imageUrls = [];
+      const seenImageUrls = new Set();
+      const youTubeUrls = [];
+      const seenYouTubeUrls = new Set();
+      const nonYouTubeEmbedUrls = [];
+      const seenNonYouTubeEmbedUrls = new Set();
+
+      const addImageUrl = (url) => {
+        if (!url || seenImageUrls.has(url)) return;
+        seenImageUrls.add(url);
+        imageUrls.push(url);
+      };
+
+      const addEmbedUrl = (url) => {
+        if (!url) return;
+        if (isYouTubeUrl(url)) {
+          if (seenYouTubeUrls.has(url)) return;
+          seenYouTubeUrls.add(url);
+          youTubeUrls.push(url);
+          return;
+        }
+
+        if (seenNonYouTubeEmbedUrls.has(url)) return;
+        seenNonYouTubeEmbedUrls.add(url);
+        nonYouTubeEmbedUrls.push(url);
+      };
+
+      for (const item of notifications) {
+        addImageUrl(item.post?.photo_url);
+        addEmbedUrl(item.post?.embed_url);
+        for (const comment of item.comments || []) {
+          addImageUrl(comment.photo_url);
+          addEmbedUrl(comment.embed_url);
+        }
+      }
+
+      const imageParts = [];
+      const includedImageUrls = [];
+      let totalBytes = 0;
+
+      for (const imageUrl of imageUrls) {
+        if (imageParts.length >= maxImages) break;
+
+        try {
+          const imageResponse = await fetch(imageUrl);
+          if (!imageResponse.ok) {
+            log(`Skipping image attachment (fetch failed): ${imageUrl} (${imageResponse.status})`);
+            continue;
+          }
+
+          const mimeTypeHeader = imageResponse.headers.get('content-type') || '';
+          const mimeType = mimeTypeHeader.split(';')[0].trim().toLowerCase();
+          if (!supportedImageMimeTypes.has(mimeType)) {
+            log(`Skipping attachment with unsupported mime type (${mimeType || 'unknown'}): ${imageUrl}`);
+            continue;
+          }
+
+          const imageArrayBuffer = await imageResponse.arrayBuffer();
+          const imageSize = imageArrayBuffer.byteLength;
+          if (totalBytes + imageSize > maxTotalBytes) {
+            log(`Skipping image attachment due to request size budget: ${imageUrl}`);
+            continue;
+          }
+
+          imageParts.push({
+            inlineData: {
+              mimeType,
+              data: Buffer.from(imageArrayBuffer).toString('base64'),
+            },
+          });
+          includedImageUrls.push(imageUrl);
+          totalBytes += imageSize;
+        } catch (imageFetchError) {
+          log(`Skipping image attachment due to fetch error: ${imageUrl} (${imageFetchError.message})`);
+        }
+      }
+
+      const includedYouTubeUrls = youTubeUrls.slice(0, maxYouTubeEmbeds);
+      if (youTubeUrls.length > maxYouTubeEmbeds) {
+        log(`Skipping ${youTubeUrls.length - maxYouTubeEmbeds} YouTube embeds due to cap (${maxYouTubeEmbeds})`);
+      }
+
+      const videoParts = includedYouTubeUrls.map((url) => ({
+        fileData: { fileUri: url },
+      }));
+
+      return {
+        imageParts,
+        includedImageUrls,
+        videoParts,
+        includedYouTubeUrls,
+        nonYouTubeEmbedUrls,
+      };
+    };
 
     // --- AUTHENTICATION SECTION ---
 
@@ -220,8 +347,8 @@ export default async ({ req, res, log, error }) => {
           created_at: entry.created_at,
           votes: entry.votes.up,
           content: entry.content,
-          photo_url: stripQueryParams(entry.media?.photo?.url),
-          embed_url: stripQueryParams(entry.media?.embed?.url),
+          photo_url: entry.media?.photo?.url || null,
+          embed_url: entry.media?.embed?.url || null,
         },
         comments: fullComments.map(comment => parseComment(comment, entry.id))
       };
@@ -256,6 +383,7 @@ export default async ({ req, res, log, error }) => {
       - Dlugosc odpowiedzi na kazde z pytan (pole "reply") nie moze przekroczyc 800 znakow.
       - Wszystkie pola (postId, username, url, post, reply) sa wymagane w kazdym obiekcie.
       - Jezeli nie ma pytan do odpowiedzi, zwroc pusta tablice [].
+      - Szczur = XTB; Olejorz = Orlen.
       
       Wpisy: ${JSON.stringify(parsedNotifications)}`;
 
@@ -264,9 +392,42 @@ export default async ({ req, res, log, error }) => {
       await retryWithBackoff(async (tools) => {
         log(`Tools enabled: ${JSON.stringify(tools.map(t => Object.keys(t)[0]))}`);
 
+        const {
+          imageParts,
+          includedImageUrls,
+          videoParts,
+          includedYouTubeUrls,
+          nonYouTubeEmbedUrls,
+        } = await buildMediaAttachmentParts(parsedNotifications);
+        const mentionsContents = [...imageParts, ...videoParts];
+        const mediaInfoBlocks = [];
+
+        if (includedImageUrls.length > 0) {
+          log(`Included ${includedImageUrls.length} image attachments for multimodal analysis`);
+          mediaInfoBlocks.push(`Dolaczone obrazy (w kolejnosci):\n${includedImageUrls.map((url, index) => `${index + 1}. ${url}`).join('\n')}`);
+        }
+
+        if (includedYouTubeUrls.length > 0) {
+          log(`Included ${includedYouTubeUrls.length} YouTube embeds for multimodal video analysis`);
+          mediaInfoBlocks.push(`Dolaczone filmy YouTube (w kolejnosci):\n${includedYouTubeUrls.map((url, index) => `${index + 1}. ${url}`).join('\n')}`);
+        }
+
+        if (nonYouTubeEmbedUrls.length > 0) {
+          log(`Found ${nonYouTubeEmbedUrls.length} non-YouTube embed URLs (urlContext fallback)`);
+          mediaInfoBlocks.push(`Dodatkowe linki osadzone (sprobuj odczytac przez urlContext):\n${nonYouTubeEmbedUrls.map((url, index) => `${index + 1}. ${url}`).join('\n')}`);
+        }
+
+        if (mediaInfoBlocks.length > 0) {
+          mentionsContents.push({ text: mediaInfoBlocks.join('\n\n') });
+        } else {
+          log('No supported image or YouTube attachments were included in multimodal request');
+        }
+
+        mentionsContents.push({ text: mentionsPrompt });
+
         const mentionsResponse = await ai.models.generateContent({
           model: model,
-          contents: mentionsPrompt,
+          contents: mentionsContents,
           config: {
             httpOptions: {
               timeout: 120000, // 120 seconds
@@ -538,10 +699,17 @@ export default async ({ req, res, log, error }) => {
             const n = parseFloat(negative ? s.slice(1, -1) : s);
             return isNaN(n) ? null : (negative ? -n : n);
           };
+          const seenNames = new Set();
           const candidates = rows
             .map(r => ({ symbol: r.symbol, name: r.name || null, marketCap: parseNum(r.marketCap), time: r.time || null }))
             .filter(r => r.marketCap != null && r.marketCap >= 10_000_000_000)
             .sort((a, b) => b.marketCap - a.marketCap)
+            .filter(r => {
+              const key = r.name?.trim().toLowerCase() ?? r.symbol;
+              if (seenNames.has(key)) return false;
+              seenNames.add(key);
+              return true;
+            })
             .slice(0, 25); // cap Finnhub calls well within the 60/min free tier limit
 
           if (candidates.length === 0) return [];
@@ -578,7 +746,6 @@ export default async ({ req, res, log, error }) => {
               epsActual,
               surprise,
               revenueActual: fh?.revenueActual ?? null,
-              revenueEstimate: fh?.revenueEstimate ?? null,
             };
           }).filter(r => r.epsEstimated != null);
       };
@@ -711,7 +878,6 @@ Wszystkie wyniki z ostatnich 90 dni dostępne [na stronie](https://wykop-index.a
                   epsEstimated: fresh.epsEstimated,
                   surprise: fresh.surprise,
                   revenueActual: fresh.revenueActual,
-                  revenueEstimate: fresh.revenueEstimate,
                 };
               });
 
@@ -754,16 +920,7 @@ Wszystkie wyniki z ostatnich 90 dni dostępne [na stronie](https://wykop-index.a
                   : '';
                 const eps = `EPS **${formatEps(entry.epsActual)}** ${beat(entry.epsActual, entry.epsEstimated)} (est. ${formatEps(entry.epsEstimated)})${surpriseStr ? ' ' + surpriseStr : ''}`;
                 const revActual = formatRevenue(entry.revenueActual);
-                const revEstimate = formatRevenue(entry.revenueEstimate);
-                const revSurprise = (entry.revenueActual !== null && entry.revenueEstimate !== null && entry.revenueEstimate !== 0)
-                  ? (entry.revenueActual - entry.revenueEstimate) / Math.abs(entry.revenueEstimate) * 100
-                  : null;
-                const revSurpriseStr = revSurprise != null
-                  ? (revSurprise >= 0 ? '+' : '') + revSurprise.toFixed(2) + '%'
-                  : '';
-                const rev = revActual != null
-                  ? `Rev. **${revActual}** ${beat(entry.revenueActual, entry.revenueEstimate)} (est. ${revEstimate ?? 'N/A'})${revSurpriseStr ? ' ' + revSurpriseStr : ''}`
-                  : null;
+                const rev = revActual != null ? `Rev. **${revActual}**` : null;
                 return `${label}\n${eps}${rev ? '\n' + rev : ''}`;
               });
 
@@ -776,6 +933,8 @@ Wszystkie wyniki z ostatnich 90 dni dostępne [na stronie](https://wykop-index.a
 
               const postContent = `**Wyniki kwartalne - ${formattedDate}**
 Wszystkie wyniki z ostatnich 90 dni dostępne [na stronie](https://wykop-index.appwrite.network/#earnings).
+
+_EPS na podstawie danych GAAP._
 
 ${lines.join('\n\n')}
 

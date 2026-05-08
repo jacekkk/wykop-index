@@ -251,6 +251,7 @@ export default async ({ req, res, log, error }) => {
     WAZNE:
     - mostDiscussed: trzy najczesciej omawiane spolki lub aktywa.
     - topQuotes: top 3 krotkich cytatow z najczesciej plusowanych wpisow uzytkownikow. UWAGA: Upewnij sie, ze pole username to uzytkownik, ktory faktycznie napisal dany cytat, a nie inny uzytkownik, ktory skomentowal ten sam wpis.
+    - Szczur = XTB; Olejorz = Orlen.
     - Wszystkie pola w odpowiedzi sa wymagane.
     
     Wpisy: ${JSON.stringify(parsedData)}`;
@@ -272,7 +273,7 @@ export default async ({ req, res, log, error }) => {
             timeout: 120000, // 120 seconds
           },
           systemInstruction: systemInstruction,
-          tools: [{urlContext: {}}],
+          tools: [{ urlContext: {} }],
         },
       });
 
@@ -302,110 +303,69 @@ export default async ({ req, res, log, error }) => {
       sentimentResult.mostDiscussed = JSON.stringify(sentimentResult.mostDiscussed);
     }
 
-    // --- TOMEK INDICATOR SECTION ---
+    // --- TOMKOWE KRESKI ---
 
-    const tomekResponses = await Promise.all(
-      [1, 2, 3, 4].map(page =>
-        fetch(`https://wykop.pl/api/v3/profile/users/tom-ek12333/actions?page=${page}&limit=50`, {
-          method: 'GET',
-          headers: {
-            'accept': 'application/json',
-            'Authorization': `Bearer ${wykopToken}`
-          }
-        })
-      )
-    );
+    let tomekVideoResult = { analysis: null, videoTitle: null, videoUrl: null, videoPublishedAt: null };
+    try {
+      const rssRes = await fetch(
+        'https://www.youtube.com/feeds/videos.xml?channel_id=UCJttpsWBTN8vxv_YNUtHHWw'
+      );
+      if (rssRes.ok) {
+        const xml = await rssRes.text();
+        const latestEntryXml = xml.match(/<entry>([\s\S]*?)<\/entry>/)?.[1] ?? null;
+        const videoId = latestEntryXml?.match(/<yt:videoId>([^<]+)<\/yt:videoId>/)?.[1] ?? null;
+        const videoUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : null;
+        const videoTitleRaw = latestEntryXml?.match(/<media:title>([^<]+)<\/media:title>/)?.[1]
+          ?? latestEntryXml?.match(/<title>([^<]+)<\/title>/)?.[1]
+          ?? null;
+        const videoTitle = videoTitleRaw
+          ?.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>') ?? null;
+        const videoPublishedAtRaw = latestEntryXml?.match(/<published>([^<]+)<\/published>/)?.[1] ?? null;
+        const parsedVideoPublishedAt = videoPublishedAtRaw ? new Date(videoPublishedAtRaw) : null;
+        const videoPublishedAt = parsedVideoPublishedAt && !Number.isNaN(parsedVideoPublishedAt.getTime())
+          ? parsedVideoPublishedAt.toISOString()
+          : null;
 
-    const tomekJsons = await Promise.all(tomekResponses.map(r => r.json()));
+        if (videoUrl) {
+          log(`Fetched latest InvestB-TB video: ${videoTitle} (${videoUrl})${videoPublishedAt ? ` published: ${videoPublishedAt}` : ''}`);
 
-    const allTomekData = tomekJsons.flatMap(j => j.data ?? []);
-    // const recentTomekData = allTomekData.filter(entry => {
-    //   // Wykop API returns Poland time, parse as UTC then subtract Poland offset
-    //   const entryDate = new Date(entry.created_at.replace(' ', 'T') + 'Z');
-    //   return entryDate.getTime() - polandOffset >= twentyFourHoursAgo.getTime();
-    // });
+          const tomekVideoPrompt = `Obejrzyj ten film i z lekką szyderą, ale też sympatią, napisz zwięzłą analizę jego treści (max 500 znaków).
 
-    // // Log times of Tomek entries in UTC and Poland time
-    // if (recentTomekData.length > 0) {
-    //   const newestTomekTime = recentTomekData[0].created_at;
-    //   const oldestTomekTime = recentTomekData[recentTomekData.length - 1].created_at;
-    //   const newestTomekUTC = formatDateTime(new Date(new Date(newestTomekTime.replace(' ', 'T') + 'Z').getTime() - polandOffset));
-    //   const oldestTomekUTC = formatDateTime(new Date(new Date(oldestTomekTime.replace(' ', 'T') + 'Z').getTime() - polandOffset));
-    //   log(`Got ${recentTomekData.length} Tomek posts between ${oldestTomekUTC} - ${newestTomekUTC} (Polish time: ${oldestTomekTime} - ${newestTomekTime})`);
-    // } else {
-    //   log('No Tomek posts from the last 24h with #gielda tag');
-    // }
+WAŻNE: Odpowiedz tylko samą analizą, bez żadnych dodatkowych komentarzy.`;
 
-    const parsedTomekData = parsePosts(allTomekData);
+          await retryWithBackoff(async () => {
+            const videoResponse = await ai.models.generateContent({
+              model: model,
+              contents: [
+                { fileData: { fileUri: videoUrl } },
+                { text: tomekVideoPrompt },
+              ],
+              config: {
+                httpOptions: { timeout: 120000 },
+                systemInstruction: 'You are a helpful assistant. Always respond in Polish.',
+              },
+            });
 
-    let tomekSentimentResult;
+            log("Tomek video response: " + JSON.stringify(videoResponse.text));
 
-    if (parsedTomekData.length === 0) {
-      tomekSentimentResult = {
-        quote: null,
-        createdAt: null,
-        url: null
-      };
-    } else {
-      const tomekPrompt = `Wybierz losowy wpis lub komentarz uzytkownika tom-ek12333 z tagu #gielda na portalu wykop.pl.
-      
-      Odpowiedz w nastepujacym formacie JSON:
-      {
-        "quote": "cytat z Tomka (max 500 znakow)",
-        "createdAt": "skopiuj wartosc z pola created_at wpisu lub komentarza",
-        "url": "skopiuj wartosc z pola url wpisu lub komentarza"
+            const analysis = videoResponse.text?.trim();
+            if (!analysis) {
+              throw new Error("Tomek video response is empty");
+            }
+
+            tomekVideoResult = {
+              analysis,
+              videoTitle: videoTitle ?? videoUrl,
+              videoUrl,
+              videoPublishedAt,
+            };
+          });
+        }
       }
-
-            
-      WAZNE:
-      - Cytat ma byc wybrany losowo spośród wszystkich wpisów i komentarzy Tomka z tagu #gielda, bez wzgledu na date publikacji. Nie wybieraj tylko najnowszego wpisu, ani nie wybieraj na podstawie sentymentu - ma to byc czysto losowy wybor spośród wszystkich wpisów.
-      - Wszystkie pola w odpowiedzi sa wymagane.
-      
-      Wpisy: ${JSON.stringify(parsedTomekData)}`;
-
-      const tomekSchema = {
-        quote: 'string',
-        createdAt: 'string',
-        url: 'string'
-      };
-
-      await retryWithBackoff(async () => {
-        const tomekResponse = await ai.models.generateContent({
-          model: model,
-          contents: tomekPrompt,
-          config: {
-            httpOptions: {
-              timeout: 120000, // 120 seconds
-            },
-            systemInstruction: systemInstruction,
-            tools: [{urlContext: {}}],
-          },
-        });
-
-        log("Tomek response: " + JSON.stringify(tomekResponse.text));
-
-        try {
-          tomekSentimentResult = cleanJsonResponse(tomekResponse.text);
-        } catch (parseError) {
-          error("Failed to parse Tomek response as JSON: " + parseError.message);
-          error("Raw response: " + tomekResponse.text);
-          throw new Error("Tomek returned invalid JSON: " + parseError.message);
-        }
-
-        // Validate schema
-        const schemaErrors = validateSchema(tomekSentimentResult, tomekSchema);
-        if (schemaErrors.length > 0) {
-          error("Tomek schema validation failed: " + schemaErrors.join(', '));
-          error("Raw response: " + tomekResponse.text);
-          throw new Error("Tomek response doesn't match expected schema: " + schemaErrors.join(', '));
-        }
-      });
+    } catch (tomekError) {
+      error(`Failed to fetch/analyze Tomek video: ${tomekError.message}`);
+      log("Continuing without Tomkowe Kreski");
     }
-
-    const formattedTomekDate = tomekSentimentResult.createdAt
-      ? new Date(new Date(tomekSentimentResult.createdAt.replace(' ', 'T') + 'Z').getTime() - polandOffset)
-          .toLocaleDateString('pl-PL', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
-      : null;
 
     // --- IMAGE GENERATION SECTION ---
     let imageId = null;
@@ -557,6 +517,24 @@ export default async ({ req, res, log, error }) => {
       const entriesChangePercentage = entriesLast24h && yesterdayEntryCount 
         ? `${(((entriesLast24h - yesterdayEntryCount) / yesterdayEntryCount) * 100) >= 0 ? '+' : ''}${Math.round((entriesLast24h - yesterdayEntryCount) / yesterdayEntryCount * 100)}%` 
         : '';
+
+      let shouldIncludeTomekInPost = false;
+      const maxTomekAgeMs = 72 * 60 * 60 * 1000;
+      if (tomekVideoResult.analysis && tomekVideoResult.videoPublishedAt) {
+        const videoPublishedAt = new Date(tomekVideoResult.videoPublishedAt);
+        if (!Number.isNaN(videoPublishedAt.getTime())) {
+          const tomekAgeMs = nowUTC.getTime() - videoPublishedAt.getTime();
+          const hoursSinceVideo = tomekAgeMs / (60 * 60 * 1000);
+          shouldIncludeTomekInPost = tomekAgeMs >= 0 && tomekAgeMs <= maxTomekAgeMs;
+          log(`Tomkowe Kreski window check: hoursSinceVideo=${hoursSinceVideo.toFixed(2)}, includeInPost=${shouldIncludeTomekInPost}`);
+        }
+      } else if (tomekVideoResult.analysis) {
+        log('Tomkowe Kreski analysis available but publish date missing; skipping in Wykop post to enforce 72-hour rule');
+      }
+
+      const tomekSectionForPost = shouldIncludeTomekInPost
+        ? `\n**Tomkowe Kreski:**\n${tomekVideoResult.analysis} ([${tomekVideoResult.videoTitle}](${tomekVideoResult.videoUrl}))\n`
+        : '';
       
       const postContent = `[Krach & Śmieciuch Index](https://wykop-index.appwrite.network/) - stan na ${formattedDate}
 
@@ -570,7 +548,7 @@ ${Array.isArray(mostDiscussed) && mostDiscussed.length > 0 ? mostDiscussed.slice
 **Topowi analitycy:**
 ${Array.isArray(topQuotes) && topQuotes.length > 0 ? topQuotes.slice(0, 3).map(user => `👤 @${user.username} (${user.sentiment}): [_"${user.quote.replace(/_/g, '\\_')}"_](${user.url})`).join('\n') : ''}
 
-${tomekSentimentResult.quote && `\n**Kroniki Tomka:**\n_${tomekSentimentResult.quote.replace(/_/g, '\\_')}_ ([${formattedTomekDate}](${tomekSentimentResult.url}))\n`}
+${tomekSectionForPost}
 
 **Statystyki:**
 👀 Obserwujący tag: ${followersCount} ${followersWeekAgo !== null ? `(tydzień temu: ${followersWeekAgo}; zmiana: ${followersChange})` : ''}
@@ -582,6 +560,8 @@ ${tomekSentimentResult.quote && `\n**Kroniki Tomka:**\n_${tomekSentimentResult.q
 👉 [Wykresy](https://wykop-index.appwrite.network/#charts)
 
 Masz pytanie? Oznacz mnie we wpisie lub komentarzu na #gielda ( ͡° ͜ʖ ͡°)
+
+Jeżeli chciałbyś wesprzeć autora, możesz to zrobić tutaj: https://buycoffee.to/jacas. Wszystkie wpłaty zostaną przekazane na śmieciuchy.
 
 #gielda #wykopindex #krachsmieciuchindex`;
 
@@ -780,9 +760,8 @@ Masz pytanie? Oznacz mnie we wpisie lub komentarzu na #gielda ( ͡° ͜ʖ ͡°)
           summary: sentimentResult.summary,
           topQuotes: sentimentResult.topQuotes,
           mostDiscussed: sentimentResult.mostDiscussed,
-          tomekSentiment: null,
-          tomekQuote: tomekSentimentResult.quote
-            ? JSON.stringify({ quote: tomekSentimentResult.quote, date: formattedTomekDate, url: tomekSentimentResult.url })
+          tomekAnalysis: tomekVideoResult.analysis
+            ? JSON.stringify({ analysis: tomekVideoResult.analysis, videoTitle: tomekVideoResult.videoTitle, videoUrl: tomekVideoResult.videoUrl, videoPublishedAt: tomekVideoResult.videoPublishedAt })
             : null,
           imageId: imageId,
           followers: followersCount,

@@ -17,13 +17,6 @@ export const cleanJsonResponse = (text) => {
 };
 
 /**
- * Strip query parameters from a URL string.
- * @param {string|null|undefined} url
- * @returns {string|null}
- */
-export const stripQueryParams = (url) => url ? url.split('?')[0] : null;
-
-/**
  * Format a revenue value into a human-readable string with T/B/M suffix.
  * Returns null for null/undefined input so callers can conditionally render.
  * @param {number|null|undefined} val
@@ -58,6 +51,6 @@ export const parseComment = (comment, entryId) => ({
   created_at: comment.created_at,
   votes: comment.votes.up,
   content: comment.content,
-  photo_url: stripQueryParams(comment.media?.photo?.url),
-  embed_url: stripQueryParams(comment.media?.embed?.url),
+  photo_url: comment.media?.photo?.url || null,
+  embed_url: comment.media?.embed?.url || null,
 });
