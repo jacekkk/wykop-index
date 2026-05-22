@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { databases } from "./lib/appwrite";
+import { tablesDB } from "./lib/appwrite";
 import { Query } from "appwrite";
 
 const DATABASE_ID = '69617178003ac8ef4fba';
@@ -36,17 +36,17 @@ export function EarningsPage() {
         const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
         ninetyDaysAgo.setUTCHours(0, 0, 0, 0);
 
-        const response = await databases.listDocuments(
-          DATABASE_ID,
-          EARNINGS_COLLECTION,
-          [
+        const response = await tablesDB.listRows({
+          databaseId: DATABASE_ID,
+          tableId: EARNINGS_COLLECTION,
+          queries: [
             Query.greaterThanEqual('$createdAt', ninetyDaysAgo.toISOString()),
             Query.orderDesc('$createdAt'),
             Query.limit(100)
           ]
-        );
+        });
 
-        const allRows = response.documents.flatMap(doc => {
+        const allRows = response.rows.flatMap(doc => {
           try {
             const entries = JSON.parse(doc.earnings);
             return Array.isArray(entries) ? entries : [];
@@ -124,6 +124,7 @@ export function EarningsPage() {
                 <th className="text-right px-3 py-2 font-semibold text-[#97979B] whitespace-nowrap">EPS est.</th>
                 <th className="text-right px-3 py-2 font-semibold text-[#97979B] whitespace-nowrap">Niespodzianka</th>
                 <th className="text-right px-3 py-2 font-semibold text-[#97979B] whitespace-nowrap">Przychody</th>
+                <th className="text-right px-3 py-2 font-semibold text-[#97979B] whitespace-nowrap">Reakcja</th>
               </tr>
             </thead>
             <tbody>
@@ -135,6 +136,11 @@ export function EarningsPage() {
                   ? (row.surprise >= 0 ? '+' : '') + Number(row.surprise).toFixed(2) + '%'
                   : null;
                 const revActual = formatRevenue(row.revenueActual);
+                const changePct = row.changePct != null ? Number(row.changePct) : null;
+                const afterMarketStr = Number.isFinite(changePct)
+                  ? (changePct >= 0 ? '+' : '') + changePct.toFixed(2) + '%'
+                  : null;
+                const afterMarketPositive = afterMarketStr != null ? changePct >= 0 : null;
 
                 return (
                   <tr
@@ -168,6 +174,13 @@ export function EarningsPage() {
                       {revActual != null ? (
                         <span>{revActual}</span>
                       ) : <span className="text-[#97979B] font-normal">—</span>}
+                    </td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                      {afterMarketStr ? (
+                        <span className={`font-semibold ${afterMarketPositive ? 'text-green-600' : 'text-red-600'}`}>
+                          {afterMarketStr}
+                        </span>
+                      ) : <span className="text-[#97979B]">—</span>}
                     </td>
                   </tr>
                 );

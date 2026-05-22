@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
 import "./App.css";
-import { databases, storage } from "./lib/appwrite";
+import { tablesDB, storage } from "./lib/appwrite";
 import { Query } from "appwrite";
 import { SentimentCandleChart } from './SentimentCandleChart';
 import { SentimentLineChartWithLegend } from './SentimentLineChart';
 import { EntriesChart } from './EntriesChart';
 import { FollowersChart } from './FollowersChart';
+import { ActiveUsersChart } from './ActiveUsersChart';
 import { EarningsPage } from './EarningsPage';
 
 // Constants
@@ -42,11 +43,12 @@ function App() {
   const [loadingSentiment, setLoadingSentiment] = useState(true);
   const [error, setError] = useState(null);
   const [imageUrl, setImageUrl] = useState(null);
-  const [chartData, setChartData] = useState({ sentiment: [], entries: [], followers: [] });
+  const [chartData, setChartData] = useState({ sentiment: [], entries: [], followers: [], activeUsers: [] });
   const [rawSentimentData, setRawSentimentData] = useState([]);
   const [comparisons, setComparisons] = useState({
     yesterdaySentiment: null,
     yesterdayEntries: null,
+    yesterdayUsers: null,
     weekAgoFollowers: null
   });
   const [replies, setReplies] = useState([]);
@@ -65,17 +67,17 @@ function App() {
       setLoadingSentiment(true);
       try {
         // Fetch the latest sentiment entry
-        const response = await databases.listDocuments(
-          DATABASE_ID,
-          SENTIMENT_COLLECTION_ID,
-          [
+        const response = await tablesDB.listRows({
+          databaseId: DATABASE_ID,
+          tableId: SENTIMENT_COLLECTION_ID,
+          queries: [
             Query.orderDesc('$createdAt'),
             Query.limit(1)
           ]
-        );
+        });
         
         // Parse JSON strings into objects
-        const parsedDocuments = response.documents.map(doc => ({
+        const parsedDocuments = response.rows.map(doc => ({
           ...doc,
           topQuotes: doc.topQuotes?.startsWith('[') ? JSON.parse(doc.topQuotes) : [],
           mostDiscussed: doc.mostDiscussed?.startsWith('[') ? JSON.parse(doc.mostDiscussed) : [],
@@ -92,17 +94,17 @@ function App() {
           // Get start of day 90 days ago to include all records from that day
           const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
           ninetyDaysAgo.setUTCHours(0, 0, 0, 0);
-          const historicalResponse = await databases.listDocuments(
-            DATABASE_ID,
-            SENTIMENT_COLLECTION_ID,
-            [
+          const historicalResponse = await tablesDB.listRows({
+            databaseId: DATABASE_ID,
+            tableId: SENTIMENT_COLLECTION_ID,
+            queries: [
               Query.greaterThanEqual('$createdAt', ninetyDaysAgo.toISOString()),
               Query.orderAsc('$createdAt'),
               Query.limit(500)
             ]
-          );
+          });
           
-          const chartData = historicalResponse.documents.map(doc => ({
+          const chartData = historicalResponse.rows.map(doc => ({
             date: formatUTCDate(doc.$createdAt),
             sentiment: doc.sentiment,
             timestamp: doc.$createdAt,
@@ -143,21 +145,21 @@ function App() {
           const startOfWeekAgoUTC = new Date(startOfTodayUTC.getTime() - 7 * 24 * 60 * 60 * 1000);
           const endOfWeekAgoUTC = new Date(startOfWeekAgoUTC.getTime() + 24 * 60 * 60 * 1000);
           
-          const yesterdayEntries = historicalResponse.documents.filter(doc => {
-            if (response.documents.length > 0 && doc.$id === response.documents[0].$id) return false;
+          const yesterdayEntries = historicalResponse.rows.filter(doc => {
+            if (response.rows.length > 0 && doc.$id === response.rows[0].$id) return false;
             const docDate = new Date(doc.$createdAt);
             return docDate >= startOfYesterdayUTC && docDate < startOfTodayUTC;
           });
           
-          const weekAgoEntries = historicalResponse.documents.filter(doc => {
-            if (response.documents.length > 0 && doc.$id === response.documents[0].$id) return false;
+          const weekAgoEntries = historicalResponse.rows.filter(doc => {
+            if (response.rows.length > 0 && doc.$id === response.rows[0].$id) return false;
             const docDate = new Date(doc.$createdAt);
             return docDate >= startOfWeekAgoUTC && docDate < endOfWeekAgoUTC;
           });
 
           // Process entries data for chart
-          const entriesChartData = historicalResponse.documents
-            .filter(doc => doc.entriesLast24h)
+          const entriesChartData = historicalResponse.rows
+            .filter(doc => doc.entriesLast24h !== null && doc.entriesLast24h !== undefined)
             .map(doc => ({
               date: formatUTCDate(doc.$createdAt),
               entries: doc.entriesLast24h,
@@ -177,8 +179,8 @@ function App() {
           );
 
           // Process followers data for chart
-          const followersChartData = historicalResponse.documents
-            .filter(doc => doc.followers)
+          const followersChartData = historicalResponse.rows
+            .filter(doc => doc.followers !== null && doc.followers !== undefined)
             .map(doc => ({
               date: formatUTCDate(doc.$createdAt),
               followers: doc.followers,
@@ -196,12 +198,34 @@ function App() {
           const followersData = Object.values(followersGroupedByDate).sort((a, b) => 
             new Date(a.timestamp) - new Date(b.timestamp)
           );
+
+          // Process active users data for chart
+          const activeUsersChartData = historicalResponse.rows
+            .filter(doc => doc.uniqueUsersLast24h !== null && doc.uniqueUsersLast24h !== undefined)
+            .map(doc => ({
+              date: formatUTCDate(doc.$createdAt),
+              activeUsers: doc.uniqueUsersLast24h,
+              timestamp: doc.$createdAt
+            }));
+
+          // Group by date and take the latest entry for each date
+          const activeUsersGroupedByDate = activeUsersChartData.reduce((acc, item) => {
+            if (!acc[item.date] || new Date(item.timestamp) > new Date(acc[item.date].timestamp)) {
+              acc[item.date] = item;
+            }
+            return acc;
+          }, {});
+
+          const activeUsersData = Object.values(activeUsersGroupedByDate).sort((a, b) =>
+            new Date(a.timestamp) - new Date(b.timestamp)
+          );
           
           // Set all state in one operation
-          setChartData({ sentiment: averagedData, entries: entriesData, followers: followersData });
+          setChartData({ sentiment: averagedData, entries: entriesData, followers: followersData, activeUsers: activeUsersData });
           setComparisons({
             yesterdaySentiment: yesterdayData?.sentiment ?? null,
             yesterdayEntries: yesterdayEntries.length > 0 ? yesterdayEntries[yesterdayEntries.length - 1].entriesLast24h : null,
+            yesterdayUsers: yesterdayEntries.length > 0 ? yesterdayEntries[yesterdayEntries.length - 1].uniqueUsersLast24h : null,
             weekAgoFollowers: weekAgoEntries.length > 0 ? weekAgoEntries[weekAgoEntries.length - 1].followers : null
           });
         } catch (err) {
@@ -210,8 +234,8 @@ function App() {
         }
 
         // Fetch the composite image from the latest sentiment data
-        if (response.documents.length > 0) {
-          const fileId = response.documents[0].imageId || 'wykopindex_v2';
+        if (response.rows.length > 0) {
+          const fileId = response.rows[0].imageId || 'wykopindex_v2';
           const imageViewUrl = storage.getFileView(BUCKET_ID, fileId);
           setImageUrl(imageViewUrl);
         }
@@ -227,15 +251,15 @@ function App() {
     async function fetchReplies() {
       setLoadingReplies(true);
       try {
-        const response = await databases.listDocuments(
-          DATABASE_ID,
-          REPLIES_COLLECTION_ID,
-          [
+        const response = await tablesDB.listRows({
+          databaseId: DATABASE_ID,
+          tableId: REPLIES_COLLECTION_ID,
+          queries: [
             Query.orderDesc('$createdAt'),
             Query.limit(5)
           ]
-        );
-        setReplies(response.documents);
+        });
+        setReplies(response.rows);
       } catch (err) {
         console.error('Error fetching replies:', err);
       } finally {
@@ -248,7 +272,7 @@ function App() {
   }, []);
 
   return (
-    <main className="flex flex-col items-center p-2 md:p-5 min-h-screen bg-white">
+    <main className="flex flex-col items-center px-3 sm:px-4 py-2 md:py-5 min-h-screen bg-white">
       {/* Navigation */}
       <nav className="w-full max-w-4xl mb-2 border-b border-[#EDEDF0]">
         <div className="flex">
@@ -314,7 +338,7 @@ function App() {
             {sentimentData.map((item) => (
               <div key={item.$id} className="rounded-md bg-white overflow-hidden">
                 {imageUrl && (
-                  <div className="px-6 pt-6">
+                  <div className="pt-6">
                     <img 
                       src={imageUrl} 
                       alt="Wykop sentiment visualization" 
@@ -322,7 +346,7 @@ function App() {
                     />
                   </div>
                 )}
-                <div className="p-6">
+                <div>
                 <div className="flex flex-col items-center mb-4">
                   <div
                     className="text-5xl font-bold mb-3"
@@ -440,13 +464,13 @@ function App() {
                   })()}
 
                   {/* Statistics Section */}
-                  {(item.followers || item.entriesLast24h || item.mostEntriesLast24h || item.mostCommentsLast24h || item.mostCombinedLast24h) && (
+                  {(item.followers !== null && item.followers !== undefined) || (item.entriesLast24h !== null && item.entriesLast24h !== undefined) || (item.uniqueUsersLast24h !== null && item.uniqueUsersLast24h !== undefined) || item.mostEntriesLast24h || item.mostCommentsLast24h || item.mostCombinedLast24h ? (
                     <div className="mt-6" id="statystyki">
                       <h3 className="text-lg font-bold text-[#CD7F32] mb-3">
                         <a href="#statystyki" className="hover:underline">Statystyki tagu</a>
                       </h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {item.followers && (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {item.followers !== null && item.followers !== undefined && (
                           <div className="bg-gray-50 p-4 rounded-lg">
                             <div className="text-sm text-[#97979B] mb-1">Obserwujący</div>
                             <div className="text-2xl font-bold text-[#2D2D31]">{item.followers.toLocaleString('pl-PL')}</div>
@@ -463,7 +487,7 @@ function App() {
                             )}
                           </div>
                         )}
-                        {item.entriesLast24h && (
+                        {item.entriesLast24h !== null && item.entriesLast24h !== undefined && (
                           <div className="bg-gray-50 p-4 rounded-lg">
                             <div className="text-sm text-[#97979B] mb-1">Wpisy (ostatnie 24h)</div>
                             <div className="text-2xl font-bold text-[#2D2D31]">{item.entriesLast24h.toLocaleString('pl-PL')}</div>
@@ -480,8 +504,25 @@ function App() {
                             )}
                           </div>
                         )}
+                        {item.uniqueUsersLast24h !== null && item.uniqueUsersLast24h !== undefined && (
+                          <div className="bg-gray-50 p-4 rounded-lg">
+                            <div className="text-sm text-[#97979B] mb-1">Aktywni użytkownicy (ostatnie 24h)</div>
+                            <div className="text-2xl font-bold text-[#2D2D31]">{item.uniqueUsersLast24h.toLocaleString('pl-PL')}</div>
+                            {comparisons.yesterdayUsers !== null && (
+                              <div className="text-sm mt-2">
+                                <span className="text-[#97979B]">Wczoraj: </span>
+                                <span className="font-semibold text-[#2D2D31]">{comparisons.yesterdayUsers.toLocaleString('pl-PL')}</span>
+                                {item.uniqueUsersLast24h !== comparisons.yesterdayUsers && (
+                                  <span className={`ml-1 font-semibold ${item.uniqueUsersLast24h > comparisons.yesterdayUsers ? 'text-[#008000]' : 'text-[#b91c1c]'}`}>
+                                    ({((item.uniqueUsersLast24h - comparisons.yesterdayUsers) / comparisons.yesterdayUsers * 100) >= 0 ? '+' : ''}{Math.round((item.uniqueUsersLast24h - comparisons.yesterdayUsers) / comparisons.yesterdayUsers * 100)}%)
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {(item.mostEntriesLast24h || item.mostCommentsLast24h || item.mostCombinedLast24h) && (
-                          <div className="bg-gray-50 p-4 rounded-lg md:col-span-2">
+                          <div className="bg-gray-50 p-4 rounded-lg md:col-span-3">
                             <div className="text-sm text-[#97979B] mb-3">Najaktywniejsi użytkownicy (ostatnie 24h)</div>
                             <div className="flex flex-col md:flex-row md:justify-between items-start gap-3 md:gap-0">
                               {item.mostCombinedLast24h && (
@@ -513,7 +554,7 @@ function App() {
                         )}
                       </div>
                     </div>
-                  )}
+                  ) : null}
 
                 </div>
                 </div>
@@ -537,7 +578,7 @@ function App() {
                 <span className="sr-only">Ładowanie wykresów...</span>
               </div>
             </div>
-          ) : (chartData.sentiment.length === 0 && chartData.entries.length === 0 && chartData.followers.length === 0) ? (
+          ) : (chartData.sentiment.length === 0 && chartData.entries.length === 0 && chartData.followers.length === 0 && chartData.activeUsers.length === 0) ? (
             <div className="text-center p-8 border border-[#EDEDF0] rounded-md bg-white">
               <p className="text-[#97979B]">Brak dostępnych danych do wyświetlenia</p>
             </div>
@@ -549,16 +590,22 @@ function App() {
                   <SentimentLineChartWithLegend data={chartData.sentiment} />
                 </div>
               )}
-              {rawSentimentData.length > 0 && (
+              {/* {rawSentimentData.length > 0 && (
                 <div>
                   <h4 className="text-base font-semibold text-[#2D2D31] mb-2">Krach & Śmieciuch Index (wykres świecowy)</h4>
                   <SentimentCandleChart data={rawSentimentData} />
                 </div>
-              )}
+              )} */}
               {chartData.entries.length > 0 && (
                 <div>
                   <h4 className="text-base font-semibold text-[#2D2D31] mb-2">Liczba wpisów na tagu #gielda</h4>
                   <EntriesChart data={chartData.entries} />
+                </div>
+              )}
+              {chartData.activeUsers.length > 0 && (
+                <div>
+                  <h4 className="text-base font-semibold text-[#2D2D31] mb-2">Liczba aktywnych użytkowników na tagu #gielda</h4>
+                  <ActiveUsersChart data={chartData.activeUsers} />
                 </div>
               )}
               {chartData.followers.length > 0 && (
@@ -611,6 +658,19 @@ function App() {
           )}
         </section>
       )}
+    <footer className="mt-8 border-t border-gray-200 py-6 w-full max-w-4xl">
+      <div className="bg-amber-50 border border-amber-200 rounded-lg px-2 sm:px-3 py-4 text-center">
+        <p className="text-[#2D2D31] font-medium whitespace-normal text-[clamp(10px,2.6vw,14px)] tracking-tight leading-snug sm:leading-relaxed">
+          <span className="block sm:inline">☕ Jeżeli chciałbyś wesprzeć autora, możesz to zrobić tutaj:{' '}</span>
+          <span className="block sm:inline">
+            <a href="https://buycoffee.to/jacas" target="_blank" rel="noopener noreferrer" className="text-amber-600 font-medium underline hover:text-amber-800">
+              buycoffee.to/jacas
+            </a>
+            . Wszystkie wpłaty zostaną przekazane na śmieciuchy.
+          </span>
+        </p>
+      </div>
+    </footer>
     </main>
   );
 }

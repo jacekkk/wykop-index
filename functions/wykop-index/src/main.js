@@ -17,15 +17,17 @@ const BUCKET_ID = '6961715000182498a35a';
 const SENTIMENT_COLLECTION = 'sentiment';
 const SUBSCRIBERS_COLLECTION = 'subscribers';
 
-export default async ({ req, res, log, error }) => {
+export default async ({ req, res, log: baseLog, error }) => {
   try {
+    const log = (message) => baseLog(`[${new Date().toISOString()}] ${message}`);
+
     // Initialize Appwrite client
     const client = new sdk.Client()
       .setEndpoint('https://fra.cloud.appwrite.io/v1')
       .setProject('wykopindex')
       .setKey(process.env.APPWRITE_API_KEY);
 
-    const databases = new sdk.Databases(client);
+    const tablesDB = new sdk.TablesDB(client);
     const storage = new sdk.Storage(client);
 
     // Initialize Gemini AI
@@ -44,12 +46,12 @@ export default async ({ req, res, log, error }) => {
     CRITICAL: You MUST respond with ONLY raw JSON. DO NOT wrap your response in markdown code blocks. DO NOT add any text before or after the JSON. Your entire response must be valid JSON that can be directly parsed.`;
 
     // Retry helper with exponential backoff
-    const maxAttempts = 4;
+    const maxAttempts = 3;
 
     const retryWithBackoff = async (fn, delayMs = 30000) => {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          const primaryModel = 'gemini-3-flash-preview';
+          const primaryModel = 'gemini-3.5-flash';
           const backupModel = 'gemini-2.5-flash';
 
           if (attempt === 1) {
@@ -197,6 +199,10 @@ export default async ({ req, res, log, error }) => {
     // Find top users
     const topEntryUser = getTopUser(userEntryCounts);
     const topCommentUser = getTopUser(userCommentCounts);
+    const uniqueUsersLast24h = new Set([
+      ...Object.keys(userEntryCounts),
+      ...Object.keys(userCommentCounts),
+    ]).size;
     
     // Calculate combined totals
     const allUsers = new Set([...Object.keys(userEntryCounts), ...Object.keys(userCommentCounts)]);
@@ -306,6 +312,7 @@ export default async ({ req, res, log, error }) => {
     // --- TOMKOWE KRESKI ---
 
     let tomekVideoResult = { analysis: null, videoTitle: null, videoUrl: null, videoPublishedAt: null };
+    const maxTomekAgeMs = 48 * 60 * 60 * 1000;
     try {
       const rssRes = await fetch(
         'https://www.youtube.com/feeds/videos.xml?channel_id=UCJttpsWBTN8vxv_YNUtHHWw'
@@ -329,37 +336,51 @@ export default async ({ req, res, log, error }) => {
         if (videoUrl) {
           log(`Fetched latest InvestB-TB video: ${videoTitle} (${videoUrl})${videoPublishedAt ? ` published: ${videoPublishedAt}` : ''}`);
 
-          const tomekVideoPrompt = `Obejrzyj ten film i z lekką szyderą, ale też sympatią, napisz zwięzłą analizę jego treści (max 500 znaków).
+          let shouldAnalyzeTomek = false;
+          if (videoPublishedAt) {
+            const tomekAgeMs = nowUTC.getTime() - parsedVideoPublishedAt.getTime();
+            const hoursSinceVideo = tomekAgeMs / (60 * 60 * 1000);
+            shouldAnalyzeTomek = tomekAgeMs <= maxTomekAgeMs;
+            log(`Tomkowe Kreski window check: hoursSinceVideo=${hoursSinceVideo.toFixed(2)}, analyze=${shouldAnalyzeTomek}`);
+          } else {
+            log('Skipping Tomkowe Kreski analysis because publish date is missing or invalid');
+          }
+
+          if (shouldAnalyzeTomek) {
+            const tomekVideoPrompt = `Obejrzyj ten film i z lekką szyderą, ale też sympatią, napisz zwięzłą analizę jego treści (max 500 znaków).
 
 WAŻNE: Odpowiedz tylko samą analizą, bez żadnych dodatkowych komentarzy.`;
 
-          await retryWithBackoff(async () => {
-            const videoResponse = await ai.models.generateContent({
-              model: model,
-              contents: [
-                { fileData: { fileUri: videoUrl } },
-                { text: tomekVideoPrompt },
-              ],
-              config: {
-                httpOptions: { timeout: 120000 },
-                systemInstruction: 'You are a helpful assistant. Always respond in Polish.',
-              },
+            await retryWithBackoff(async () => {
+              const videoResponse = await ai.models.generateContent({
+                model: model,
+                contents: [
+                  { fileData: { fileUri: videoUrl } },
+                  { text: tomekVideoPrompt },
+                ],
+                config: {
+                  httpOptions: { timeout: 120000 },
+                  systemInstruction: 'You are a helpful assistant. Always respond in Polish.',
+                },
+              });
+
+              log("Tomek video response: " + JSON.stringify(videoResponse.text));
+
+              const analysis = videoResponse.text?.trim();
+              if (!analysis) {
+                throw new Error("Tomek video response is empty");
+              }
+
+              tomekVideoResult = {
+                analysis,
+                videoTitle: videoTitle ?? videoUrl,
+                videoUrl,
+                videoPublishedAt,
+              };
             });
-
-            log("Tomek video response: " + JSON.stringify(videoResponse.text));
-
-            const analysis = videoResponse.text?.trim();
-            if (!analysis) {
-              throw new Error("Tomek video response is empty");
-            }
-
-            tomekVideoResult = {
-              analysis,
-              videoTitle: videoTitle ?? videoUrl,
-              videoUrl,
-              videoPublishedAt,
-            };
-          });
+          } else {
+            log('Skipping Tomkowe Kreski analysis because the latest video is outside the 48-hour window');
+          }
         }
       }
     } catch (tomekError) {
@@ -438,22 +459,22 @@ WAŻNE: Odpowiedz tylko samą analizą, bez żadnych dodatkowych komentarzy.`;
       const now = new Date();
       const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-      const lastThirtyDaysData = await databases.listDocuments(
-        DATABASE_ID,
-        SENTIMENT_COLLECTION,
-        [
+      const lastThirtyDaysData = await tablesDB.listRows({
+        databaseId: DATABASE_ID,
+        tableId: SENTIMENT_COLLECTION,
+        queries: [
           sdk.Query.greaterThan('$createdAt', thirtyDaysAgo.toISOString()),
           sdk.Query.orderAsc('$createdAt'),
           sdk.Query.limit(150)
         ]
-      );
+      });
 
       // Use UTC for date boundaries since database stores timestamps in UTC
       const startOfTodayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
       const startOfYesterdayUTC = new Date(startOfTodayUTC.getTime() - 24 * 60 * 60 * 1000);
       
       // Get yesterday's sentiment and entry count
-      const yesterdayEntries = lastThirtyDaysData.documents.filter(doc => {
+      const yesterdayEntries = lastThirtyDaysData.rows.filter(doc => {
         const docDate = new Date(doc.$createdAt);
         return docDate >= startOfYesterdayUTC && docDate < startOfTodayUTC;
       });
@@ -465,12 +486,12 @@ WAŻNE: Odpowiedz tylko samą analizą, bez żadnych dodatkowych komentarzy.`;
       const totalSentiment = yesterdayEntries.reduce((sum, doc) => sum + doc.sentiment, 0);
       const yesterdaySentiment = yesterdayEntries.length > 0 ? Math.round(totalSentiment / yesterdayEntries.length) : null;
       const yesterdayEntryCount = yesterdayEntries.length > 0 ? yesterdayEntries[yesterdayEntries.length - 1].entriesLast24h : null;
-      log(`Yesterday's average sentiment: ${yesterdaySentiment} (from ${yesterdayEntries.length} entries)`);
+      const yesterdayUserCount = yesterdayEntries.length > 0 ? yesterdayEntries[yesterdayEntries.length - 1].uniqueUsersLast24h : null;
 
       // Get followers from a week ago
       const startOfWeekAgoUTC = new Date(startOfTodayUTC.getTime() - 7 * 24 * 60 * 60 * 1000);
       const endOfWeekAgoUTC = new Date(startOfWeekAgoUTC.getTime() + 24 * 60 * 60 * 1000);
-      const weekAgoEntries = lastThirtyDaysData.documents.filter(doc => {
+      const weekAgoEntries = lastThirtyDaysData.rows.filter(doc => {
         const docDate = new Date(doc.$createdAt);
         return docDate >= startOfWeekAgoUTC && docDate < endOfWeekAgoUTC;
       });
@@ -517,23 +538,8 @@ WAŻNE: Odpowiedz tylko samą analizą, bez żadnych dodatkowych komentarzy.`;
       const entriesChangePercentage = entriesLast24h && yesterdayEntryCount 
         ? `${(((entriesLast24h - yesterdayEntryCount) / yesterdayEntryCount) * 100) >= 0 ? '+' : ''}${Math.round((entriesLast24h - yesterdayEntryCount) / yesterdayEntryCount * 100)}%` 
         : '';
-
-      let shouldIncludeTomekInPost = false;
-      const maxTomekAgeMs = 72 * 60 * 60 * 1000;
-      if (tomekVideoResult.analysis && tomekVideoResult.videoPublishedAt) {
-        const videoPublishedAt = new Date(tomekVideoResult.videoPublishedAt);
-        if (!Number.isNaN(videoPublishedAt.getTime())) {
-          const tomekAgeMs = nowUTC.getTime() - videoPublishedAt.getTime();
-          const hoursSinceVideo = tomekAgeMs / (60 * 60 * 1000);
-          shouldIncludeTomekInPost = tomekAgeMs >= 0 && tomekAgeMs <= maxTomekAgeMs;
-          log(`Tomkowe Kreski window check: hoursSinceVideo=${hoursSinceVideo.toFixed(2)}, includeInPost=${shouldIncludeTomekInPost}`);
-        }
-      } else if (tomekVideoResult.analysis) {
-        log('Tomkowe Kreski analysis available but publish date missing; skipping in Wykop post to enforce 72-hour rule');
-      }
-
-      const tomekSectionForPost = shouldIncludeTomekInPost
-        ? `\n**Tomkowe Kreski:**\n${tomekVideoResult.analysis} ([${tomekVideoResult.videoTitle}](${tomekVideoResult.videoUrl}))\n`
+      const usersChangePercentage = uniqueUsersLast24h && yesterdayUserCount
+        ? `${(((uniqueUsersLast24h - yesterdayUserCount) / yesterdayUserCount) * 100) >= 0 ? '+' : ''}${Math.round((uniqueUsersLast24h - yesterdayUserCount) / yesterdayUserCount * 100)}%`
         : '';
       
       const postContent = `[Krach & Śmieciuch Index](https://wykop-index.appwrite.network/) - stan na ${formattedDate}
@@ -548,20 +554,19 @@ ${Array.isArray(mostDiscussed) && mostDiscussed.length > 0 ? mostDiscussed.slice
 **Topowi analitycy:**
 ${Array.isArray(topQuotes) && topQuotes.length > 0 ? topQuotes.slice(0, 3).map(user => `👤 @${user.username} (${user.sentiment}): [_"${user.quote.replace(/_/g, '\\_')}"_](${user.url})`).join('\n') : ''}
 
-${tomekSectionForPost}
+${tomekVideoResult.analysis ? `\n**Tomkowe Kreski:**\n${tomekVideoResult.analysis} ([${tomekVideoResult.videoTitle}](${tomekVideoResult.videoUrl}))\n` : ''}
 
 **Statystyki:**
 👀 Obserwujący tag: ${followersCount} ${followersWeekAgo !== null ? `(tydzień temu: ${followersWeekAgo}; zmiana: ${followersChange})` : ''}
 📜 Ilość wpisów w ostatnich 24h: ${entriesLast24h} ${yesterdayEntryCount !== null ? `(wczoraj: ${yesterdayEntryCount}; zmiana: ${entriesChangePercentage})` : ''}
+👥 Aktywni użytkownicy w ostatnich 24h: ${uniqueUsersLast24h} ${yesterdayUserCount !== null ? `(wczoraj: ${yesterdayUserCount}; zmiana: ${usersChangePercentage})` : ''}
 🥇 Najaktywniejszy ogółem: ${topCombinedUser.username} (${topCombinedUser.count})
 🥈 Najwięcej wpisów: ${topEntryUser.username} (${topEntryUser.count})
 🥉 Najwięcej komentarzy: ${topCommentUser.username} (${topCommentUser.count})
 
 👉 [Wykresy](https://wykop-index.appwrite.network/#charts)
 
-Masz pytanie? Oznacz mnie we wpisie lub komentarzu na #gielda ( ͡° ͜ʖ ͡°)
-
-Jeżeli chciałbyś wesprzeć autora, możesz to zrobić tutaj: https://buycoffee.to/jacas. Wszystkie wpłaty zostaną przekazane na śmieciuchy.
+Jeżeli chciałbyś wesprzeć autora, możesz to zrobić tutaj: [buycoffee.to/jacas](https://buycoffee.to/jacas). Wszystkie wpłaty zostaną przekazane na śmieciuchy.
 
 #gielda #wykopindex #krachsmieciuchindex`;
 
@@ -685,14 +690,14 @@ Jeżeli chciałbyś wesprzeć autora, możesz to zrobić tutaj: https://buycoffe
       log(`Successfully posted to Wykop, entry ID: ${entryId}`);
 
       // Fetch active subscribers
-      const subscribersResult = await databases.listDocuments(
-        DATABASE_ID,
-        SUBSCRIBERS_COLLECTION,
-        [sdk.Query.limit(1000)]
-      );
+      const subscribersResult = await tablesDB.listRows({
+        databaseId: DATABASE_ID,
+        tableId: SUBSCRIBERS_COLLECTION,
+        queries: [sdk.Query.limit(1000)]
+      });
 
-      const subscriberMentions = subscribersResult.documents.map(doc => `@${doc.$id}`).join(', ');
-      log(`Fetched ${subscribersResult.documents.length} subscribers`);
+      const subscriberMentions = subscribersResult.rows.map(doc => `@${doc.$id}`).join(', ');
+      log(`Fetched ${subscribersResult.rows.length} subscribers`);
 
       // Post subscription comment under the entry
       const commentResponse = await fetch(`https://wykop.pl/api/v3/entries/${entryId}/comments`, {
@@ -751,11 +756,11 @@ Jeżeli chciałbyś wesprzeć autora, możesz to zrobić tutaj: https://buycoffe
 
     log("Saving to database");
 
-    const dbResult = await databases.createDocument(
-        DATABASE_ID,
-        SENTIMENT_COLLECTION,
-        sdk.ID.unique(),
-        {
+    const dbResult = await tablesDB.createRow({
+      databaseId: DATABASE_ID,
+      tableId: SENTIMENT_COLLECTION,
+      rowId: sdk.ID.unique(),
+      data: {
           sentiment: parseInt(sentimentResult.sentiment),
           summary: sentimentResult.summary,
           topQuotes: sentimentResult.topQuotes,
@@ -766,12 +771,13 @@ Jeżeli chciałbyś wesprzeć autora, możesz to zrobić tutaj: https://buycoffe
           imageId: imageId,
           followers: followersCount,
           entriesLast24h: entriesLast24h,
+          uniqueUsersLast24h: uniqueUsersLast24h,
           mostEntriesLast24h: JSON.stringify(topEntryUser),
           mostCommentsLast24h: JSON.stringify(topCommentUser),
           mostCombinedLast24h: JSON.stringify(topCombinedUser),
           entryId: entryId ? String(entryId) : null
         }
-    );
+    });
 
     log("Database entry added: " + dbResult.$id);
 
