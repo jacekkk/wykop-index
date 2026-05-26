@@ -9,15 +9,17 @@ const SENTIMENT_COLLECTION = 'sentiment';
 const SUBSCRIBERS_COLLECTION = 'subscribers';
 const EARNINGS_COLLECTION = 'earnings';
 
-export default async ({ req, res, log, error }) => {
+export default async ({ req, res, log: baseLog, error }) => {
   try {
+    const log = (message) => baseLog(`[${new Date().toISOString()}] ${message}`);
+
     // Initialize Appwrite client
     const client = new sdk.Client()
       .setEndpoint('https://fra.cloud.appwrite.io/v1')
       .setProject('wykopindex')
       .setKey(process.env.APPWRITE_API_KEY);
 
-    const databases = new sdk.Databases(client);
+    const tablesDB = new sdk.TablesDB(client);
 
     // Initialize Gemini AI
     const primaryAi = new GoogleGenAI({
@@ -37,8 +39,10 @@ export default async ({ req, res, log, error }) => {
     - Keep each reply under 800 characters.
     - Use a mildly ironic and sarcastic tone characteristic of Wykop but only where appropriate based on the content you're responding to. If the question is straightforward and serious, respond in a direct manner.
     - Provide specific, concrete answers - avoid generalities and platitudes.
-    - If a question is about the specific stocks or your recommendations, do not provide generic advice. Research the stocks, recent news, and provide a data-driven answer based on that.
+    - If a question is about a specific stock/company or asks for your view on it, do not provide generic advice. First verify the latest available data using live retrieval tools before answering.
+    - CRITICAL ANTI-HALLUCINATION RULE: NEVER state specific stock prices, EPS figures, revenue numbers, market cap values, P/E ratios, earnings reporting dates, or any other financial metrics from memory. You MUST use googleSearch or urlContext to look up the current data BEFORE including any specific number or date in your response. If the tool lookup fails or returns no data, say "Nie udało mi się zweryfikować aktualnych danych" instead of guessing. Stating wrong data is far worse than admitting you can't verify it.
     - If you can't access an attachment or URL, say "Nie mogę otworzyć załącznika, ale na podstawie tekstu mogę powiedzieć, że..." and provide an answer based on the text alone.
+    - You can only watch YouTube videos natively. For non-YouTube video embeds (e.g. Streamable, Twitter/X), you can only read page metadata — you CANNOT see the visual content. Do NOT describe images as if they were the video. Each attachment in the prompt clearly states whether it is a photo_url (image) or embed_url (video).
     - If you can't answer a question or it doesn't warrant a response, ignore it and do not include it in the output.
     - DO NOT respond to comments that say "@KrachSmieciuchIndex nie wołaj" - these are instructions from users to not be notified about the future updates, so you should ignore them.
     
@@ -49,7 +53,7 @@ export default async ({ req, res, log, error }) => {
     const retryWithBackoff = async (fn, maxAttempts = 4, delayMs = 30000) => {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          const backupModel = 'gemini-3-flash-preview';
+          const backupModel = 'gemini-3.5-flash';
 
           switch (attempt) {
             case 1:
@@ -73,7 +77,7 @@ export default async ({ req, res, log, error }) => {
 
           const tools = [{ urlContext: {} }];
 
-          // googleSearch is not supported in gemini-3-flash-preview free tier
+          // googleSearch is not supported in gemini-3.5-flash free tier
           if (model === 'gemini-2.5-flash') {
             tools.push({ googleSearch: {} });
           }
@@ -129,47 +133,57 @@ export default async ({ req, res, log, error }) => {
       maxYouTubeEmbeds = 4
     ) => {
       const imageUrls = [];
+      const imageUrlSources = [];
       const seenImageUrls = new Set();
       const youTubeUrls = [];
+      const youTubeUrlSources = [];
       const seenYouTubeUrls = new Set();
       const nonYouTubeEmbedUrls = [];
+      const nonYouTubeEmbedUrlSources = [];
       const seenNonYouTubeEmbedUrls = new Set();
 
-      const addImageUrl = (url) => {
+      const addImageUrl = (url, source) => {
         if (!url || seenImageUrls.has(url)) return;
         seenImageUrls.add(url);
         imageUrls.push(url);
+        imageUrlSources.push(source);
       };
 
-      const addEmbedUrl = (url) => {
+      const addEmbedUrl = (url, source) => {
         if (!url) return;
         if (isYouTubeUrl(url)) {
           if (seenYouTubeUrls.has(url)) return;
           seenYouTubeUrls.add(url);
           youTubeUrls.push(url);
+          youTubeUrlSources.push(source);
           return;
         }
 
         if (seenNonYouTubeEmbedUrls.has(url)) return;
         seenNonYouTubeEmbedUrls.add(url);
         nonYouTubeEmbedUrls.push(url);
+        nonYouTubeEmbedUrlSources.push(source);
       };
 
       for (const item of notifications) {
-        addImageUrl(item.post?.photo_url);
-        addEmbedUrl(item.post?.embed_url);
+        const postSource = `wpis #${item.post?.id}`;
+        addImageUrl(item.post?.photo_url, `photo_url z ${postSource}`);
+        addEmbedUrl(item.post?.embed_url, `embed_url z ${postSource}`);
         for (const comment of item.comments || []) {
-          addImageUrl(comment.photo_url);
-          addEmbedUrl(comment.embed_url);
+          const commentSource = `komentarz #${comment.id} we wpisie #${item.post?.id}`;
+          addImageUrl(comment.photo_url, `photo_url z ${commentSource}`);
+          addEmbedUrl(comment.embed_url, `embed_url z ${commentSource}`);
         }
       }
 
       const imageParts = [];
       const includedImageUrls = [];
+      const includedImageSources = [];
       let totalBytes = 0;
 
-      for (const imageUrl of imageUrls) {
+      for (let i = 0; i < imageUrls.length; i++) {
         if (imageParts.length >= maxImages) break;
+        const imageUrl = imageUrls[i];
 
         try {
           const imageResponse = await fetch(imageUrl);
@@ -199,6 +213,7 @@ export default async ({ req, res, log, error }) => {
             },
           });
           includedImageUrls.push(imageUrl);
+          includedImageSources.push(imageUrlSources[i] ?? imageUrl);
           totalBytes += imageSize;
         } catch (imageFetchError) {
           log(`Skipping image attachment due to fetch error: ${imageUrl} (${imageFetchError.message})`);
@@ -206,6 +221,7 @@ export default async ({ req, res, log, error }) => {
       }
 
       const includedYouTubeUrls = youTubeUrls.slice(0, maxYouTubeEmbeds);
+      const includedYouTubeSources = youTubeUrlSources.slice(0, maxYouTubeEmbeds);
       if (youTubeUrls.length > maxYouTubeEmbeds) {
         log(`Skipping ${youTubeUrls.length - maxYouTubeEmbeds} YouTube embeds due to cap (${maxYouTubeEmbeds})`);
       }
@@ -217,9 +233,12 @@ export default async ({ req, res, log, error }) => {
       return {
         imageParts,
         includedImageUrls,
+        includedImageSources,
         videoParts,
         includedYouTubeUrls,
+        includedYouTubeSources,
         nonYouTubeEmbedUrls,
+        nonYouTubeEmbedSources: nonYouTubeEmbedUrlSources,
       };
     };
 
@@ -384,6 +403,8 @@ export default async ({ req, res, log, error }) => {
       - Wszystkie pola (postId, username, url, post, reply) sa wymagane w kazdym obiekcie.
       - Jezeli nie ma pytan do odpowiedzi, zwroc pusta tablice [].
       - Szczur = XTB; Olejorz = Orlen.
+      - Przy pytaniach o konkretna spolke, cene, target, wyniki, wycene albo "co myslisz o X", najpierw sprawdz aktualne dane live. Preferuj Yahoo Finance dla ceny/fundamentow/newsow, a stockanalysis.com jako zapasowe zrodlo. Dla wynikow kwartalnych i kalendarza earnings uzyj https://finance.yahoo.com/calendar/earnings/ jako glowne zrodlo, a https://www.zacks.com/earnings/earnings-calendar jako zapasowe. Uzyj tez googleSearch lub urlContext do weryfikacji.
+      - NIGDY nie podawaj konkretnych cen akcji, wycen, EPS, P/E, dat raportowania ani innych danych finansowych z pamieci. ZAWSZE uzyj googleSearch lub urlContext, zeby sprawdzic aktualne dane PRZED odpowiedzia. Jezeli narzedzia nie zwroca danych, napisz ze nie udalo ci sie zweryfikowac aktualnych danych zamiast zgadywac.
       
       Wpisy: ${JSON.stringify(parsedNotifications)}`;
 
@@ -395,26 +416,29 @@ export default async ({ req, res, log, error }) => {
         const {
           imageParts,
           includedImageUrls,
+          includedImageSources,
           videoParts,
           includedYouTubeUrls,
+          includedYouTubeSources,
           nonYouTubeEmbedUrls,
+          nonYouTubeEmbedSources,
         } = await buildMediaAttachmentParts(parsedNotifications);
         const mentionsContents = [...imageParts, ...videoParts];
         const mediaInfoBlocks = [];
 
         if (includedImageUrls.length > 0) {
           log(`Included ${includedImageUrls.length} image attachments for multimodal analysis`);
-          mediaInfoBlocks.push(`Dolaczone obrazy (w kolejnosci):\n${includedImageUrls.map((url, index) => `${index + 1}. ${url}`).join('\n')}`);
+          mediaInfoBlocks.push(`Dolaczone obrazy (w kolejnosci — kazdy obraz jest zalaczony jako multimodal inline data):\n${includedImageUrls.map((url, index) => `${index + 1}. ${url} [${includedImageSources[index]}]`).join('\n')}`);
         }
 
         if (includedYouTubeUrls.length > 0) {
           log(`Included ${includedYouTubeUrls.length} YouTube embeds for multimodal video analysis`);
-          mediaInfoBlocks.push(`Dolaczone filmy YouTube (w kolejnosci):\n${includedYouTubeUrls.map((url, index) => `${index + 1}. ${url}`).join('\n')}`);
+          mediaInfoBlocks.push(`Dolaczone filmy YouTube (w kolejnosci — kazdy film jest zalaczony jako fileData):\n${includedYouTubeUrls.map((url, index) => `${index + 1}. ${url} [${includedYouTubeSources[index]}]`).join('\n')}`);
         }
 
         if (nonYouTubeEmbedUrls.length > 0) {
           log(`Found ${nonYouTubeEmbedUrls.length} non-YouTube embed URLs (urlContext fallback)`);
-          mediaInfoBlocks.push(`Dodatkowe linki osadzone (sprobuj odczytac przez urlContext):\n${nonYouTubeEmbedUrls.map((url, index) => `${index + 1}. ${url}`).join('\n')}`);
+          mediaInfoBlocks.push(`Dodatkowe linki osadzone — NIE sa to obrazy (sprobuj odczytac przez urlContext):\n${nonYouTubeEmbedUrls.map((url, index) => `${index + 1}. ${url} [${nonYouTubeEmbedSources[index]}]`).join('\n')}`);
         }
 
         if (mediaInfoBlocks.length > 0) {
@@ -438,6 +462,10 @@ export default async ({ req, res, log, error }) => {
         });
 
         log("Mentions response: " + JSON.stringify(mentionsResponse.text));
+
+        if (!mentionsResponse.text) {
+          throw new Error("Mentions response text is empty or undefined");
+        }
 
         try {
           mentionsResult = cleanJsonResponse(mentionsResponse.text);
@@ -509,17 +537,17 @@ export default async ({ req, res, log, error }) => {
           try {
             log(`Saving reply to database`);
 
-            const dbResult = await databases.createDocument(
-              DATABASE_ID,
-              REPLIES_COLLECTION,
-              sdk.ID.unique(),
-              {
+            const dbResult = await tablesDB.createRow({
+              databaseId: DATABASE_ID,
+              tableId: REPLIES_COLLECTION,
+              rowId: sdk.ID.unique(),
+              data: {
                 postUrl: replyObj.url,
                 question: replyObj.post,
                 reply: replyObj.reply,
                 username: replyObj.username
               }
-            );
+            });
             log(`Database entry added: ${dbResult.$id}`);
           } catch (dbError) {
             error(`Failed to save reply to database: ${dbError.message}`);
@@ -556,16 +584,16 @@ export default async ({ req, res, log, error }) => {
     // --- SET SUBSCRIBERS SECTION ---
 
     try {
-      const latestSentiment = await databases.listDocuments(
-        DATABASE_ID,
-        SENTIMENT_COLLECTION,
-        [
+      const latestSentiment = await tablesDB.listRows({
+        databaseId: DATABASE_ID,
+        tableId: SENTIMENT_COLLECTION,
+        queries: [
           sdk.Query.orderDesc('$createdAt'),
           sdk.Query.limit(1)
         ]
-      );
+      });
 
-      const latestEntryId = latestSentiment.documents[0]?.entryId;
+      const latestEntryId = latestSentiment.rows[0]?.entryId;
       log(`Latest sentiment entryId: ${latestEntryId}`);
 
       if (latestEntryId) {
@@ -610,15 +638,19 @@ export default async ({ req, res, log, error }) => {
 
             try {
               try {
-                await databases.getDocument(DATABASE_ID, SUBSCRIBERS_COLLECTION, voterUsername);
+                await tablesDB.getRow({
+                  databaseId: DATABASE_ID,
+                  tableId: SUBSCRIBERS_COLLECTION,
+                  rowId: voterUsername
+                });
                 log(`Subscriber already exists (skipping): ${voterUsername}`);
               } catch (notFoundError) {
-                await databases.createDocument(
-                  DATABASE_ID,
-                  SUBSCRIBERS_COLLECTION,
-                  voterUsername,
-                  { username: voterUsername }
-                );
+                await tablesDB.createRow({
+                  databaseId: DATABASE_ID,
+                  tableId: SUBSCRIBERS_COLLECTION,
+                  rowId: voterUsername,
+                  data: { username: voterUsername }
+                });
                 log(`Added subscriber: ${voterUsername}`);
               }
             } catch (subscriberError) {
@@ -640,7 +672,11 @@ export default async ({ req, res, log, error }) => {
           const unsubUsername = comment.author.username;
 
           try {
-            await databases.deleteDocument(DATABASE_ID, SUBSCRIBERS_COLLECTION, unsubUsername);
+            await tablesDB.deleteRow({
+              databaseId: DATABASE_ID,
+              tableId: SUBSCRIBERS_COLLECTION,
+              rowId: unsubUsername
+            });
             log(`Unsubscribed: ${unsubUsername}`);
           } catch (notFoundError) {
             log(`Unsubscribe request from non-subscriber: ${unsubUsername}`);
@@ -750,17 +786,68 @@ export default async ({ req, res, log, error }) => {
           }).filter(r => r.epsEstimated != null);
       };
 
+      // Fetch market change data for all symbols in a single YF v7/finance/quote batch call.
+      // Returns a Map<symbol, {postMarketChangePct, regularMarketChangePct}>.
+      // Requires a crumb (session token) fetched from YF getcrumb endpoint.
+      const fetchMarketChangePcts = async (symbols) => {
+        const empty = { postMarketChangePct: null, regularMarketChangePct: null };
+        const result = new Map(symbols.map(s => [s, { ...empty }]));
+        try {
+          const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+          // YF getcrumb requires a valid session cookie — establish one first via fc.yahoo.com
+          const sessionResponse = await fetch('https://fc.yahoo.com', { headers: { 'User-Agent': UA } });
+          const setCookies = typeof sessionResponse.headers.getSetCookie === 'function'
+            ? sessionResponse.headers.getSetCookie()
+            : [sessionResponse.headers.get('set-cookie') ?? ''];
+          const cookieHeader = setCookies.map(c => c.split(';')[0]).filter(Boolean).join('; ');
+
+          const crumbResponse = await fetch('https://query2.finance.yahoo.com/v1/test/getcrumb', {
+            headers: { 'Accept': 'text/plain', 'User-Agent': UA, 'Cookie': cookieHeader }
+          });
+          if (!crumbResponse.ok) {
+            log(`YF getcrumb failed: ${crumbResponse.status}`);
+            return result;
+          }
+          const crumb = (await crumbResponse.text()).trim();
+
+          const symbolsParam = symbols.map(s => encodeURIComponent(s)).join('%2C');
+          const quoteUrl = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbolsParam}&fields=regularMarketPrice%2CregularMarketChangePercent%2CpostMarketPrice%2CpostMarketChangePercent%2CpreMarketPrice%2CpreMarketChangePercent&crumb=${encodeURIComponent(crumb)}`;
+
+          const quoteResponse = await fetch(quoteUrl, {
+            headers: { 'Accept': 'application/json', 'User-Agent': UA, 'Cookie': cookieHeader }
+          });
+          if (!quoteResponse.ok) {
+            log(`YF v7/finance/quote batch failed: ${quoteResponse.status}`);
+            return result;
+          }
+
+          const quoteJson = await quoteResponse.json();
+          for (const quote of quoteJson?.quoteResponse?.result ?? []) {
+            result.set(quote.symbol, {
+              postMarketChangePct: (quote.hasPrePostMarketData && typeof quote.postMarketChangePercent === 'number')
+                ? quote.postMarketChangePercent : null,
+              regularMarketChangePct: typeof quote.regularMarketChangePercent === 'number'
+                ? quote.regularMarketChangePercent : null,
+            });
+          }
+        } catch (fetchError) {
+          log(`YF market change batch fetch error: ${fetchError.message}`);
+        }
+        return result;
+      };
+
       // --- MORNING PREVIEW (9:00–10:59 UTC) ---
       if (isPreviewTime) {
-        const existingDocs = (await databases.listDocuments(
-          DATABASE_ID,
-          EARNINGS_COLLECTION,
-          [
+        const existingDocs = (await tablesDB.listRows({
+          databaseId: DATABASE_ID,
+          tableId: EARNINGS_COLLECTION,
+          queries: [
             sdk.Query.greaterThanEqual('$createdAt', startOfTradingDayUTC.toISOString()),
             sdk.Query.orderDesc('$createdAt'),
             sdk.Query.limit(1)
           ]
-        )).documents;
+        })).rows;
 
         if (existingDocs.length > 0) {
           log(`Preview already handled for ${todayET}, skipping.`);
@@ -772,12 +859,12 @@ export default async ({ req, res, log, error }) => {
             log(`No earnings data for preview on ${todayET}`);
           } else {
             const top10 = earningsData.slice(0, 10);
-            await databases.createDocument(
-              DATABASE_ID,
-              EARNINGS_COLLECTION,
-              sdk.ID.unique(),
-              { earnings: JSON.stringify(top10), posted: false }
-            );
+            await tablesDB.createRow({
+              databaseId: DATABASE_ID,
+              tableId: EARNINGS_COLLECTION,
+              rowId: sdk.ID.unique(),
+              data: { earnings: JSON.stringify(top10), posted: false }
+            });
             log(`Saved earnings record for ${todayET} with ${top10.length} entries (${earningsData.length} total candidates)`);
 
             const previewLines = top10.map(entry => {
@@ -826,15 +913,15 @@ Wszystkie wyniki z ostatnich 90 dni dostępne [na stronie](https://wykop-index.a
 
       // --- EVENING RESULTS (after 16:30 ET) ---
       if (isAfterClose) {
-        const existingDocs = (await databases.listDocuments(
-          DATABASE_ID,
-          EARNINGS_COLLECTION,
-          [
+        const existingDocs = (await tablesDB.listRows({
+          databaseId: DATABASE_ID,
+          tableId: EARNINGS_COLLECTION,
+          queries: [
             sdk.Query.greaterThanEqual('$createdAt', startOfTradingDayUTC.toISOString()),
             sdk.Query.orderDesc('$createdAt'),
             sdk.Query.limit(1)
           ]
-        )).documents;
+        })).rows;
 
         let currentDoc = existingDocs[0] || null;
 
@@ -847,12 +934,12 @@ Wszystkie wyniki z ostatnich 90 dni dostępne [na stronie](https://wykop-index.a
             log(`No earnings data returned from Nasdaq + Finnhub for ${todayET}`);
           } else {
             const top10fallback = earningsData.slice(0, 10);
-            currentDoc = await databases.createDocument(
-              DATABASE_ID,
-              EARNINGS_COLLECTION,
-              sdk.ID.unique(),
-              { earnings: JSON.stringify(top10fallback), posted: false }
-            );
+            currentDoc = await tablesDB.createRow({
+              databaseId: DATABASE_ID,
+              tableId: EARNINGS_COLLECTION,
+              rowId: sdk.ID.unique(),
+              data: { earnings: JSON.stringify(top10fallback), posted: false }
+            });
             log(`Saved earnings record for ${todayET} with ${top10fallback.length} entries`);
           }
         }
@@ -881,8 +968,13 @@ Wszystkie wyniki z ostatnich 90 dni dostępne [na stronie](https://wykop-index.a
                 };
               });
 
-              await databases.updateDocument(DATABASE_ID, EARNINGS_COLLECTION, currentDoc.$id, {
-                earnings: JSON.stringify(currentData)
+              await tablesDB.updateRow({
+                databaseId: DATABASE_ID,
+                tableId: EARNINGS_COLLECTION,
+                rowId: currentDoc.$id,
+                data: {
+                  earnings: JSON.stringify(currentData)
+                }
               });
             }
 
@@ -912,8 +1004,30 @@ Wszystkie wyniki z ostatnich 90 dni dostępne [na stronie](https://wykop-index.a
                 }
               }
               postableData.sort((a, b) => b.marketCap - a.marketCap);
+
+              const marketChangePcts = await fetchMarketChangePcts(postableData.map(e => e.symbol));
+              const postableDataWithAfterMarket = postableData.map(entry => {
+                const selectedChangePcts = marketChangePcts.get(entry.symbol) ?? {
+                  postMarketChangePct: null,
+                  regularMarketChangePct: null,
+                };
+                const isPreMarket = entry.time === 'time-pre-market';
+
+                return {
+                  ...entry,
+                  changePct: isPreMarket
+                    ? selectedChangePcts.regularMarketChangePct
+                    : selectedChangePcts.postMarketChangePct,
+                };
+              });
+
+              const formatSignedPct = (value) => {
+                if (value == null || !Number.isFinite(value)) return null;
+                return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+              };
+
               const beat = (actual, est) => actual != null && est != null ? (actual >= est ? '✅' : '❌') : '';
-              const lines = postableData.map(entry => {
+              const lines = postableDataWithAfterMarket.map(entry => {
                 const label = `[${entry.symbol}](https://finance.yahoo.com/quote/${entry.symbol})${entry.name ? ` (${entry.name})` : ''}`;
                 const surpriseStr = entry.surprise != null
                   ? (entry.surprise >= 0 ? '+' : '') + entry.surprise.toFixed(2) + '%'
@@ -921,7 +1035,10 @@ Wszystkie wyniki z ostatnich 90 dni dostępne [na stronie](https://wykop-index.a
                 const eps = `EPS **${formatEps(entry.epsActual)}** ${beat(entry.epsActual, entry.epsEstimated)} (est. ${formatEps(entry.epsEstimated)})${surpriseStr ? ' ' + surpriseStr : ''}`;
                 const revActual = formatRevenue(entry.revenueActual);
                 const rev = revActual != null ? `Rev. **${revActual}**` : null;
-                return `${label}\n${eps}${rev ? '\n' + rev : ''}`;
+                // Pre-market reporters: reaction is in the regular session change vs yesterday's close.
+                // After-hours reporters: reaction is in the post-market change vs today's close.
+                const changeLine = formatSignedPct(entry.changePct) != null ? `Reakcja: **${formatSignedPct(entry.changePct)}**` : null;
+                return `${label}\n${eps}${rev ? '\n' + rev : ''}${changeLine ? '\n' + changeLine : ''}`;
               });
 
               const formattedDate = nowUTC.toLocaleString('pl-PL', {
@@ -940,7 +1057,7 @@ ${lines.join('\n\n')}
 
 #gielda #wykopindex #krachsmieciuchindex`;
 
-              log(`Posting earnings results for ${postableData.length} companies...`);
+              log(`Posting earnings results for ${postableDataWithAfterMarket.length} companies...`);
 
               // Create survey
               let surveyId = null;
@@ -994,9 +1111,14 @@ ${lines.join('\n\n')}
               const earningsEntryId = earningsPostResult.data.id;
               log(`Successfully posted earnings results, entry ID: ${earningsEntryId}`);
 
-              await databases.updateDocument(DATABASE_ID, EARNINGS_COLLECTION, currentDoc.$id, {
-                earnings: JSON.stringify(postableData),
-                posted: true
+              await tablesDB.updateRow({
+                databaseId: DATABASE_ID,
+                tableId: EARNINGS_COLLECTION,
+                rowId: currentDoc.$id,
+                data: {
+                  earnings: JSON.stringify(postableDataWithAfterMarket),
+                  posted: true
+                }
               });
               log(`Marked earnings record as posted.`);
             }

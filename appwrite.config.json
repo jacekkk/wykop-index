@@ -54,8 +54,8 @@
                 "files.write"
             ],
             "events": [],
-            "schedule": "0 7,19 * * 1-5",
-            "timeout": 600,
+            "schedule": "10 7,19 * * 1-5",
+            "timeout": 900,
             "entrypoint": "src/main.js",
             "commands": "npm install",
             "specification": "s-0.5vcpu-512mb",
@@ -181,6 +181,15 @@
                 },
                 {
                     "key": "entriesLast24h",
+                    "type": "integer",
+                    "required": false,
+                    "array": false,
+                    "min": 1,
+                    "max": 1000000,
+                    "default": null
+                },
+                {
+                    "key": "uniqueUsersLast24h",
                     "type": "integer",
                     "required": false,
                     "array": false,
