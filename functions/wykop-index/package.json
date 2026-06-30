@@ -8,11 +8,11 @@
     "format": "prettier --write ."
   },
   "dependencies": {
-    "@google/genai": "^2.6.0",
-    "@napi-rs/canvas": "^1.0.0",
-    "node-appwrite": "^25.2.0"
+    "@google/genai": "^2.10.0",
+    "@napi-rs/canvas": "^1.0.2",
+    "node-appwrite": "^26.2.0"
   },
   "devDependencies": {
-    "prettier": "^3.8.3"
+    "prettier": "^3.9.4"
   }
 }
