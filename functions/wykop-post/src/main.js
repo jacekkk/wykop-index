@@ -50,7 +50,7 @@ export default async ({ req, res, log: baseLog, error }) => {
     `;
 
     // Retry helper with exponential backoff
-    const retryWithBackoff = async (fn, maxAttempts = 4, delayMs = 30000) => {
+    const retryWithBackoff = async (fn, maxAttempts = 4, delayMs = 45000) => {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
           const backupModel = 'gemini-3.5-flash';
@@ -402,7 +402,7 @@ export default async ({ req, res, log: baseLog, error }) => {
       - Dlugosc odpowiedzi na kazde z pytan (pole "reply") nie moze przekroczyc 800 znakow.
       - Wszystkie pola (postId, username, url, post, reply) sa wymagane w kazdym obiekcie.
       - Jezeli nie ma pytan do odpowiedzi, zwroc pusta tablice [].
-      - Szczur = XTB; Olejorz = Orlen.
+      - XTB w tagowym slangu to Szczur, Orlen to Olejorz, a Microsoft to Okniorz.
       - Przy pytaniach o konkretna spolke, cene, target, wyniki, wycene albo "co myslisz o X", najpierw sprawdz aktualne dane live. Preferuj Yahoo Finance dla ceny/fundamentow/newsow, a stockanalysis.com jako zapasowe zrodlo. Dla wynikow kwartalnych i kalendarza earnings uzyj https://finance.yahoo.com/calendar/earnings/ jako glowne zrodlo, a https://www.zacks.com/earnings/earnings-calendar jako zapasowe. Uzyj tez googleSearch lub urlContext do weryfikacji.
       - NIGDY nie podawaj konkretnych cen akcji, wycen, EPS, P/E, dat raportowania ani innych danych finansowych z pamieci. ZAWSZE uzyj googleSearch lub urlContext, zeby sprawdzic aktualne dane PRZED odpowiedzia. Jezeli narzedzia nie zwroca danych, napisz ze nie udalo ci sie zweryfikowac aktualnych danych zamiast zgadywac.
       
@@ -464,6 +464,9 @@ export default async ({ req, res, log: baseLog, error }) => {
         log("Mentions response: " + JSON.stringify(mentionsResponse.text));
 
         if (!mentionsResponse.text) {
+          log("Empty .text — finishReason: " + JSON.stringify(mentionsResponse.candidates?.[0]?.finishReason));
+          log("promptFeedback: " + JSON.stringify(mentionsResponse.promptFeedback));
+          log("candidate parts: " + JSON.stringify(mentionsResponse.candidates?.[0]?.content?.parts));
           throw new Error("Mentions response text is empty or undefined");
         }
 

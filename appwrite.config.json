@@ -58,7 +58,9 @@
             "timeout": 900,
             "entrypoint": "src/main.js",
             "commands": "npm install",
-            "specification": "s-0.5vcpu-512mb",
+            "buildSpecification": "s-2vcpu-2gb",
+            "runtimeSpecification": "s-0.5vcpu-512mb",
+            "deploymentRetention": 30,
             "path": "functions/wykop-index"
         },
         {
@@ -77,7 +79,9 @@
             "timeout": 300,
             "entrypoint": "src/main.js",
             "commands": "npm install",
-            "specification": "s-0.5vcpu-512mb",
+            "buildSpecification": "s-2vcpu-2gb",
+            "runtimeSpecification": "s-0.5vcpu-512mb",
+            "deploymentRetention": 30,
             "path": "functions/wykop-post"
         }
     ],
@@ -346,8 +350,10 @@
             "installCommand": "npm install",
             "buildCommand": "npm run build",
             "outputDirectory": "./dist",
-            "specification": "s-0.5vcpu-512mb",
+            "buildSpecification": "s-2vcpu-2gb",
+            "runtimeSpecification": "s-0.5vcpu-512mb",
             "buildRuntime": "node-22",
+            "deploymentRetention": 30,
             "adapter": "static",
             "fallbackFile": "index.html",
             "path": "sites/WykopIndex"

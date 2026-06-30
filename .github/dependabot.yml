@@ -7,8 +7,14 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 10
     groups:
-      # group updates to all dependencies into a single PR
+      # group version updates to all dependencies into a single PR
       update-all:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      # group security updates to all dependencies into a single PR
+      security-all:
+        applies-to: security-updates
         patterns:
           - "*"
 
@@ -20,6 +26,11 @@ updates:
     open-pull-requests-limit: 10
     groups:
       update-all:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      security-all:
+        applies-to: security-updates
         patterns:
           - "*"
 
@@ -31,5 +42,10 @@ updates:
     open-pull-requests-limit: 10
     groups:
       update-all:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      security-all:
+        applies-to: security-updates
         patterns:
           - "*"
