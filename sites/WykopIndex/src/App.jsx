@@ -88,17 +88,17 @@ function App() {
         
         setSentimentData(parsedDocuments);
 
-        // Fetch historical data for last 90 days
+        // Fetch historical data for last 180 days
         try {
           const now = new Date();
-          // Get start of day 90 days ago to include all records from that day
-          const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-          ninetyDaysAgo.setUTCHours(0, 0, 0, 0);
+          // Get start of day 180 days ago to include all records from that day
+          const oneHundredEightyDaysAgo = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+          oneHundredEightyDaysAgo.setUTCHours(0, 0, 0, 0);
           const historicalResponse = await tablesDB.listRows({
             databaseId: DATABASE_ID,
             tableId: SENTIMENT_COLLECTION_ID,
             queries: [
-              Query.greaterThanEqual('$createdAt', ninetyDaysAgo.toISOString()),
+              Query.greaterThanEqual('$createdAt', oneHundredEightyDaysAgo.toISOString()),
               Query.orderAsc('$createdAt'),
               Query.limit(500)
             ]

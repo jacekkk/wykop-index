@@ -51,8 +51,8 @@ export default async ({ req, res, log: baseLog, error }) => {
     const retryWithBackoff = async (fn, delayMs = 30000) => {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          const primaryModel = 'gemini-3.5-flash';
-          const backupModel = 'gemini-2.5-flash';
+          const primaryModel = 'gemini-3.7-flash';
+          const backupModel = 'gemini-3.5-flash';
 
           if (attempt === 1) {
             model = primaryModel;
@@ -73,28 +73,38 @@ export default async ({ req, res, log: baseLog, error }) => {
       }
     };
 
-    // Authenticate with Wykop API
-    let wykopAuthResponse = await fetch('https://wykop.pl/api/v3/auth', {
-      method: 'POST',
-      headers: {
-        'accept': 'application/json',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        data: {
-          key: process.env.WYKOP_API_KEY,
-          secret: process.env.WYKOP_API_SECRET
-        }
-      })
-    });
+    log("Authenticating with Wykop API...");
 
-    if (!wykopAuthResponse.ok) {
-      throw new Error(`Wykop auth failed: ${wykopAuthResponse.status} ${await wykopAuthResponse.text()}`);
+    let wykopToken;
+    let wykopAuthResponse;
+    let wykopAuthResponseJson;
+
+    try {
+      // Authenticate with Wykop API
+      wykopAuthResponse = await fetch('https://wykop.pl/api/v3/auth', {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          data: {
+            key: process.env.WYKOP_API_KEY,
+            secret: process.env.WYKOP_API_SECRET
+          }
+        })
+      });
+
+      if (!wykopAuthResponse.ok) {
+        throw new Error(`Wykop auth failed: ${wykopAuthResponse.status} ${await wykopAuthResponse.text()}`);
+      }
+
+      wykopAuthResponseJson = await wykopAuthResponse.json();
+      wykopToken = wykopAuthResponseJson.data.token;
+      log("Successfully authenticated with Wykop using API key");
+    } catch (err) {
+      throw new Error(`Wykop auth failed: ${err.message}`);
     }
-
-    let wykopAuthResponseJson = await wykopAuthResponse.json();
-    let wykopToken = wykopAuthResponseJson.data.token;
-    log("Successfully authenticated with Wykop using API key");
 
     // Get current UTC time and calculate Poland offset (UTC+1 or UTC+2 depending on DST)
     const nowUTC = new Date();

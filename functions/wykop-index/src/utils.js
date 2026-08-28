@@ -103,7 +103,7 @@ export const parsePosts = (posts) => posts.map(entry => ({
 }));
 
 /**
- * Pick a random URL from a comma-separated list string (e.g. an env var).
+ * Pick a random URL from a pipe-separated list string (e.g. an env var).
  * @param {string|null|undefined} urlList
  * @returns {string|null}
  */

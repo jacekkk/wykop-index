@@ -133,3 +133,4 @@ dist
 .appwrite
 
 test-mentions.js
+test-search-loop.js
