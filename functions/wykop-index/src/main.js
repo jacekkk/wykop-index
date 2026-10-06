@@ -51,8 +51,8 @@ export default async ({ req, res, log: baseLog, error }) => {
     const retryWithBackoff = async (fn, delayMs = 30000) => {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          const primaryModel = 'gemini-3.5-flash';
-          const backupModel = 'gemini-2.5-flash';
+          const primaryModel = 'gemini-3.7-flash';
+          const backupModel = 'gemini-3.5-flash';
 
           if (attempt === 1) {
             model = primaryModel;
@@ -73,28 +73,38 @@ export default async ({ req, res, log: baseLog, error }) => {
       }
     };
 
-    // Authenticate with Wykop API
-    let wykopAuthResponse = await fetch('https://wykop.pl/api/v3/auth', {
-      method: 'POST',
-      headers: {
-        'accept': 'application/json',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        data: {
-          key: process.env.WYKOP_API_KEY,
-          secret: process.env.WYKOP_API_SECRET
-        }
-      })
-    });
+    log("Authenticating with Wykop API...");
 
-    if (!wykopAuthResponse.ok) {
-      throw new Error(`Wykop auth failed: ${wykopAuthResponse.status} ${await wykopAuthResponse.text()}`);
+    let wykopToken;
+    let wykopAuthResponse;
+    let wykopAuthResponseJson;
+
+    try {
+      // Authenticate with Wykop API
+      wykopAuthResponse = await fetch('https://wykop.pl/api/v3/auth', {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          data: {
+            key: process.env.WYKOP_API_KEY,
+            secret: process.env.WYKOP_API_SECRET
+          }
+        })
+      });
+
+      if (!wykopAuthResponse.ok) {
+        throw new Error(`Wykop auth failed: ${wykopAuthResponse.status} ${await wykopAuthResponse.text()}`);
+      }
+
+      wykopAuthResponseJson = await wykopAuthResponse.json();
+      wykopToken = wykopAuthResponseJson.data.token;
+      log("Successfully authenticated with Wykop using API key");
+    } catch (err) {
+      throw new Error(`Wykop auth failed: ${err.message}`);
     }
-
-    let wykopAuthResponseJson = await wykopAuthResponse.json();
-    let wykopToken = wykopAuthResponseJson.data.token;
-    log("Successfully authenticated with Wykop using API key");
 
     // Get current UTC time and calculate Poland offset (UTC+1 or UTC+2 depending on DST)
     const nowUTC = new Date();
@@ -542,7 +552,7 @@ WAŻNE: Odpowiedz tylko samą analizą, bez żadnych dodatkowych komentarzy.`;
         ? `${(((uniqueUsersLast24h - yesterdayUserCount) / yesterdayUserCount) * 100) >= 0 ? '+' : ''}${Math.round((uniqueUsersLast24h - yesterdayUserCount) / yesterdayUserCount * 100)}%`
         : '';
       
-      const postContent = `[Krach & Śmieciuch Index](https://wykop-index.appwrite.network/) - stan na ${formattedDate}
+      const postContent = `**Krach & Śmieciuch Index** - stan na ${formattedDate}
 
 **${sentimentResult.sentiment}/100 ${emoji}** ${yesterdaySentiment !== null ? `(wczoraj: ${yesterdaySentiment})` : ''}
 
@@ -552,7 +562,7 @@ ${sentimentResult.summary}
 ${Array.isArray(mostDiscussed) && mostDiscussed.length > 0 ? mostDiscussed.slice(0, 3).map(topic => `🔥 [${topic.asset}](${topic.url}): ${topic.reasoning}`).join('\n') : ''}
 
 **Topowi analitycy:**
-${Array.isArray(topQuotes) && topQuotes.length > 0 ? topQuotes.slice(0, 3).map(user => `👤 @${user.username} (${user.sentiment}): [_"${user.quote.replace(/_/g, '\\_')}"_](${user.url})`).join('\n') : ''}
+${Array.isArray(topQuotes) && topQuotes.length > 0 ? topQuotes.slice(0, 3).map(user => `👤 @${user.username} (${user.sentiment}): "${user.quote}" ([wpis](${user.url}))`).join('\n') : ''}
 
 ${tomekVideoResult.analysis ? `\n**Tomkowe Kreski:**\n${tomekVideoResult.analysis} ([${tomekVideoResult.videoTitle}](${tomekVideoResult.videoUrl}))\n` : ''}
 

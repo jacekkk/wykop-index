@@ -1,6 +1,16 @@
 import * as sdk from 'node-appwrite';
 import { GoogleGenAI } from '@google/genai';
-import { cleanJsonResponse, parseComment, formatEps, formatRevenue } from './utils.js';
+import {
+  applyCurrentQuoteGuard,
+  buildSearchQuery,
+  cleanJsonResponse,
+  extractTickerFromSearchResults,
+  formatEps,
+  formatRevenue,
+  isCurrentPriceQuestion,
+  parseYahooChartQuote,
+  parseComment,
+} from './utils.js';
 
 // Appwrite resource IDs
 const DATABASE_ID = '69617178003ac8ef4fba';
@@ -32,7 +42,7 @@ export default async ({ req, res, log: baseLog, error }) => {
 
     let ai = primaryAi;
 
-    let model = 'gemini-2.5-flash';
+    let model = 'gemini-3.7-flash';
     const systemInstruction = `You are KrachSmieciuchIndex, a helpful assistant that responds to questions about stock markets, investing, and economics on Wykop, a Polish social media platform.
     
     BEHAVIORAL RULES:
@@ -40,7 +50,7 @@ export default async ({ req, res, log: baseLog, error }) => {
     - Use a mildly ironic and sarcastic tone characteristic of Wykop but only where appropriate based on the content you're responding to. If the question is straightforward and serious, respond in a direct manner.
     - Provide specific, concrete answers - avoid generalities and platitudes.
     - If a question is about a specific stock/company or asks for your view on it, do not provide generic advice. First verify the latest available data using live retrieval tools before answering.
-    - CRITICAL ANTI-HALLUCINATION RULE: NEVER state specific stock prices, EPS figures, revenue numbers, market cap values, P/E ratios, earnings reporting dates, or any other financial metrics from memory. You MUST use googleSearch or urlContext to look up the current data BEFORE including any specific number or date in your response. If the tool lookup fails or returns no data, say "Nie udało mi się zweryfikować aktualnych danych" instead of guessing. Stating wrong data is far worse than admitting you can't verify it.
+    - CRITICAL ANTI-HALLUCINATION RULE: NEVER state specific stock prices, EPS figures, revenue numbers, market cap values, P/E ratios, earnings reporting dates, or any other financial metrics from memory. Search-result snippets can be stale and are not proof of a current price. For questions about the current or live price, use ONLY the "currentQuote" object and include its observedAt time. If currentQuote is absent, say "Nie udało mi się zweryfikować aktualnych danych" instead of giving any price. Do not infer holdings, profit, loss, position size, or trades unless the user explicitly supplied those facts.
     - If you can't access an attachment or URL, say "Nie mogę otworzyć załącznika, ale na podstawie tekstu mogę powiedzieć, że..." and provide an answer based on the text alone.
     - You can only watch YouTube videos natively. For non-YouTube video embeds (e.g. Streamable, Twitter/X), you can only read page metadata — you CANNOT see the visual content. Do NOT describe images as if they were the video. Each attachment in the prompt clearly states whether it is a photo_url (image) or embed_url (video).
     - If you can't answer a question or it doesn't warrant a response, ignore it and do not include it in the output.
@@ -49,11 +59,87 @@ export default async ({ req, res, log: baseLog, error }) => {
     CRITICAL: You MUST respond with ONLY raw JSON. DO NOT wrap your response in markdown code blocks. DO NOT add any text before or after the JSON. Your entire response must be valid JSON that can be directly parsed.
     `;
 
+    // --- WEB SEARCH GROUNDING ---
+    // We pre-fetch web search results ourselves (does NOT count against Gemini RPD) and inject
+    // them into the prompt, so grounding needs only ONE generateContent call. Provider: Tavily or Brave.
+    const searchProvider = (process.env.SEARCH_PROVIDER || 'tavily').toLowerCase();
+    const webSearchTimeoutMs = 8000;
+    const webSearchConcurrency = 4;
+
+    const webSearch = async (query, maxResults = 5) => {
+      if (!query || !query.trim()) return { results: [] };
+      try {
+        if (searchProvider === 'brave') {
+          const braveUrl = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${maxResults}`;
+          const braveResp = await fetch(braveUrl, {
+            signal: AbortSignal.timeout(webSearchTimeoutMs),
+            headers: {
+              'Accept': 'application/json',
+              'X-Subscription-Token': process.env.BRAVE_API_KEY,
+            },
+          });
+          if (!braveResp.ok) throw new Error(`Brave search ${braveResp.status}`);
+          const braveJson = await braveResp.json();
+          const results = (braveJson.web?.results || []).slice(0, maxResults).map((r) => ({
+            title: r.title,
+            url: r.url,
+            snippet: r.description,
+          }));
+          return { results };
+        }
+
+        // default: Tavily
+        const tavilyResp = await fetch('https://api.tavily.com/search', {
+          method: 'POST',
+          signal: AbortSignal.timeout(webSearchTimeoutMs),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.TAVILY_API_KEY}`,
+          },
+          body: JSON.stringify({
+            query,
+            max_results: maxResults,
+            search_depth: 'basic',
+          }),
+        });
+        if (!tavilyResp.ok) throw new Error(`Tavily search ${tavilyResp.status}`);
+        const tavilyJson = await tavilyResp.json();
+        const results = (tavilyJson.results || []).slice(0, maxResults).map((r) => ({
+          title: r.title,
+          url: r.url,
+          snippet: r.content,
+        }));
+        return { results };
+      } catch (searchErr) {
+        log(`Web search failed for "${query}": ${searchErr.message}`);
+        return { results: [], error: searchErr.message };
+      }
+    };
+
+    const fetchCurrentQuote = async (searchResults) => {
+      const ticker = extractTickerFromSearchResults(searchResults);
+      if (!ticker) return null;
+
+      try {
+        const quoteResponse = await fetch(
+          `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1m&range=1d&includePrePost=true`,
+          { signal: AbortSignal.timeout(webSearchTimeoutMs) }
+        );
+        if (!quoteResponse.ok) throw new Error(`Yahoo Finance quote ${quoteResponse.status}`);
+
+        const quoteJson = await quoteResponse.json();
+        return parseYahooChartQuote(ticker, quoteJson);
+      } catch (quoteError) {
+        log(`Current quote lookup failed for ${ticker}: ${quoteError.message}`);
+        return null;
+      }
+    };
+
     // Retry helper with exponential backoff
     const retryWithBackoff = async (fn, maxAttempts = 4, delayMs = 45000) => {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          const backupModel = 'gemini-3.5-flash';
+          const fallbackModel = 'gemini-3.5-flash';
 
           switch (attempt) {
             case 1:
@@ -64,23 +150,18 @@ export default async ({ req, res, log: baseLog, error }) => {
               ai = backupAi;
               break;
             case 3:
-              log(`Attempt 3: Using primary AI instance and ${backupModel} model`);
+              log(`Attempt 3: Using primary AI instance and ${fallbackModel} model`);
               ai = primaryAi;
-              model = backupModel;
+              model = fallbackModel;
               break;
             case 4:
-              log(`Attempt 4: Final attempt with backup AI instance and ${backupModel} model`);
+              log(`Attempt 4: Final attempt with backup AI instance and ${fallbackModel} model`);
               ai = backupAi;
-              model = backupModel;
+              model = fallbackModel;
               break;
           }
 
           const tools = [{ urlContext: {} }];
-
-          // googleSearch is not supported in gemini-3.5-flash free tier
-          if (model === 'gemini-2.5-flash') {
-            tools.push({ googleSearch: {} });
-          }
 
           return await fn(tools);
         } catch (err) {
@@ -245,26 +326,33 @@ export default async ({ req, res, log: baseLog, error }) => {
     // --- AUTHENTICATION SECTION ---
 
     log("Authenticating with Wykop API using refresh token...");
-    const wykopAuthResponse = await fetch('https://wykop.pl/api/v3/refresh-token', {
-      method: 'POST',
-      headers: {
-        'accept': 'application/json',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        data: {
-          refresh_token: process.env.WYKOP_REFRESH_TOKEN
-        }
-      })
-    });
 
-    if (!wykopAuthResponse.ok) {
-      throw new Error(`Wykop auth failed: ${wykopAuthResponse.status} ${await wykopAuthResponse.text()}`);
+    let wykopToken;
+
+    try {
+      const wykopAuthResponse = await fetch('https://wykop.pl/api/v3/refresh-token', {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          data: {
+            refresh_token: process.env.WYKOP_REFRESH_TOKEN
+          }
+        })
+      });
+
+      if (!wykopAuthResponse.ok) {
+        throw new Error(`Wykop auth failed: ${wykopAuthResponse.status} ${await wykopAuthResponse.text()}`);
+      }
+
+      const wykopAuthResponseJson = await wykopAuthResponse.json();
+      wykopToken = wykopAuthResponseJson.data.token;
+      log("Successfully authenticated with Wykop using refresh token");
+    } catch (err) {
+      throw new Error(`Wykop auth failed: ${err.message}`);
     }
-
-    const wykopAuthResponseJson = await wykopAuthResponse.json();
-    const wykopToken = wykopAuthResponseJson.data.token;
-    log("Successfully authenticated with Wykop using refresh token");
 
     // --- FETCH NOTIFICATIONS SECTION ---
     
@@ -384,6 +472,25 @@ export default async ({ req, res, log: baseLog, error }) => {
     if (parsedNotifications.length === 0) {
       mentionsResult = [];
     } else {
+      // Pre-fetch web search per question (our infra — does NOT count against Gemini RPD).
+      for (let index = 0; index < parsedNotifications.length; index += webSearchConcurrency) {
+        const batch = parsedNotifications.slice(index, index + webSearchConcurrency);
+        await Promise.all(batch.map(async (notification) => {
+          const requestedAt = new Date();
+          const searchContext = [
+            notification.post.content,
+            ...notification.comments.map(comment => comment.content),
+          ].filter(Boolean).join('\n');
+          const searchQuery = buildSearchQuery(notification.questionToAnswer, requestedAt, searchContext);
+          const { results } = await webSearch(searchQuery, 4);
+          notification.searchResults = results;
+          notification.searchResultsRetrievedAt = requestedAt.toISOString();
+          notification.currentQuote = isCurrentPriceQuestion(notification.questionToAnswer)
+            ? await fetchCurrentQuote(results)
+            : null;
+        }));
+      }
+
       const mentionsPrompt = `Udziel odpowiedzi na wpisy/komentarze, w ktorych zostales oznaczony. Jezeli wpis nie zawiera pytania lub prosby, zignoruj go i nie umieszczaj w odpowiedzi.
       Odpowiadaj szczerze i konkretnie, bazujac na danych i faktach, ale jezeli wpis jest ironiczny lub sarkastyczny, odpowiedz w podobnym tonie.
       Odpowiadaj tylko na tekst z pola questionToAnswer, ale uwzglednij kontekst z calego wpisu (pole post) oraz komentarzy (pole comments), aby dostarczyc precyzyjna odpowiedz.
@@ -403,8 +510,11 @@ export default async ({ req, res, log: baseLog, error }) => {
       - Wszystkie pola (postId, username, url, post, reply) sa wymagane w kazdym obiekcie.
       - Jezeli nie ma pytan do odpowiedzi, zwroc pusta tablice [].
       - XTB w tagowym slangu to Szczur, Orlen to Olejorz, a Microsoft to Okniorz.
-      - Przy pytaniach o konkretna spolke, cene, target, wyniki, wycene albo "co myslisz o X", najpierw sprawdz aktualne dane live. Preferuj Yahoo Finance dla ceny/fundamentow/newsow, a stockanalysis.com jako zapasowe zrodlo. Dla wynikow kwartalnych i kalendarza earnings uzyj https://finance.yahoo.com/calendar/earnings/ jako glowne zrodlo, a https://www.zacks.com/earnings/earnings-calendar jako zapasowe. Uzyj tez googleSearch lub urlContext do weryfikacji.
-      - NIGDY nie podawaj konkretnych cen akcji, wycen, EPS, P/E, dat raportowania ani innych danych finansowych z pamieci. ZAWSZE uzyj googleSearch lub urlContext, zeby sprawdzic aktualne dane PRZED odpowiedzia. Jezeli narzedzia nie zwroca danych, napisz ze nie udalo ci sie zweryfikowac aktualnych danych zamiast zgadywac.
+      - Przy pytaniach o konkretna spolke, cene, target, wyniki, wycene albo "co myslisz o X", opieraj sie na aktualnych danych.
+      - Pole "searchResults" zawiera wyniki wyszukiwania, ale ich fragmenty moga opisywac historyczne lub opoznione dane. Czas searchResultsRetrievedAt oznacza czas wyszukania, a NIE czas notowania.
+      - Przy pytaniu o obecna, aktualna lub live cene podaj liczbe WYLACZNIE z pola "currentQuote" i zawsze podaj czas "observedAt". Jezeli currentQuote jest null, nie podawaj zadnej ceny.
+      - NIGDY nie wymyslaj portfela, liczby akcji, ceny zakupu, zysku, straty ani transakcji użytkownika. Uzyj tych informacji tylko wtedy, gdy zostaly wprost podane w questionToAnswer, post, comments albo widocznym zalaczniku.
+      - Dla pozostalych konkretnych danych finansowych opieraj sie na tresci zrodel, uwzgledniajac date danych. Jezeli nie da sie ich zweryfikowac, napisz to zamiast zgadywac.
       
       Wpisy: ${JSON.stringify(parsedNotifications)}`;
 
@@ -437,8 +547,8 @@ export default async ({ req, res, log: baseLog, error }) => {
         }
 
         if (nonYouTubeEmbedUrls.length > 0) {
-          log(`Found ${nonYouTubeEmbedUrls.length} non-YouTube embed URLs (urlContext fallback)`);
-          mediaInfoBlocks.push(`Dodatkowe linki osadzone — NIE sa to obrazy (sprobuj odczytac przez urlContext):\n${nonYouTubeEmbedUrls.map((url, index) => `${index + 1}. ${url} [${nonYouTubeEmbedSources[index]}]`).join('\n')}`);
+          log(`Found ${nonYouTubeEmbedUrls.length} non-YouTube embed URLs (urlContext)`);
+          mediaInfoBlocks.push(`Dodatkowe linki osadzone — NIE sa to obrazy (sprobuj otworzyc te URL-e, zeby odczytac tresc):\n${nonYouTubeEmbedUrls.map((url, index) => `${index + 1}. ${url} [${nonYouTubeEmbedSources[index]}]`).join('\n')}`);
         }
 
         if (mediaInfoBlocks.length > 0) {
@@ -457,7 +567,7 @@ export default async ({ req, res, log: baseLog, error }) => {
               timeout: 120000, // 120 seconds
             },
             systemInstruction: systemInstruction,
-            tools: tools
+            tools: tools,
           },
         });
 
@@ -504,6 +614,8 @@ export default async ({ req, res, log: baseLog, error }) => {
           throw new Error("Mentions response doesn't match expected schema: " + errors.join(', '));
         }
       });
+
+      mentionsResult = applyCurrentQuoteGuard(mentionsResult, parsedNotifications);
     }
 
     // --- POST TO WYKOP AND SAVE TO DATABASE SECTION ---

@@ -54,3 +54,97 @@ export const parseComment = (comment, entryId) => ({
   photo_url: comment.media?.photo?.url || null,
   embed_url: comment.media?.embed?.url || null,
 });
+
+export const isCurrentPriceQuestion = (text) => {
+  if (!text) return false;
+  const normalized = text.toLocaleLowerCase('pl-PL');
+  const asksForPrice = /(cena|cenę|cene|kurs|notowania|ile kosztuje)/.test(normalized);
+  const asksForCurrentValue = /(obecn|aktualn|teraz|dzisiaj|dziś|dzis|live|na ten moment)/.test(normalized);
+  return asksForPrice && asksForCurrentValue;
+};
+
+export const buildSearchQuery = (question, requestedAt, context = '') => {
+  if (!isCurrentPriceQuestion(question)) return question;
+  const boundedContext = context.replace(/\s+/g, ' ').trim().slice(0, 1200);
+  return [
+    question,
+    boundedContext ? `Conversation context: ${boundedContext}` : null,
+    `ticker current live stock quote price as of ${requestedAt.toISOString()} Yahoo Finance`,
+  ].filter(Boolean).join('\n');
+};
+
+export const extractTickerFromSearchResults = (results) => {
+  const trustedPaths = new Map([
+    ['finance.yahoo.com', /^\/quote\/([A-Z0-9.-]{1,10})(?:\/|$)/i],
+    ['stockanalysis.com', /^\/stocks\/([A-Z0-9.-]{1,10})(?:\/|$)/i],
+    ['marketwatch.com', /^\/investing\/stock\/([A-Z0-9.-]{1,10})(?:\/|$)/i],
+    ['nasdaq.com', /^\/market-activity\/stocks\/([A-Z0-9.-]{1,10})(?:\/|$)/i],
+  ]);
+
+  for (const result of results || []) {
+    try {
+      const url = new URL(result.url);
+      const hostname = url.hostname.toLowerCase().replace(/^www\./, '');
+      const pattern = trustedPaths.get(hostname);
+      const match = pattern && url.pathname.match(pattern);
+      if (match) return match[1].toUpperCase();
+    } catch {
+      continue;
+    }
+  }
+  return null;
+};
+
+export const parseYahooChartQuote = (ticker, quoteJson) => {
+  const chart = quoteJson.chart?.result?.[0];
+  const timestamps = chart?.timestamp || [];
+  const closes = chart?.indicators?.quote?.[0]?.close || [];
+  let latestIndex = closes.length - 1;
+  while (latestIndex >= 0 && !Number.isFinite(closes[latestIndex])) latestIndex -= 1;
+  if (latestIndex < 0 || !timestamps[latestIndex]) return null;
+
+  const symbol = chart.meta?.symbol || ticker;
+  return {
+    symbol,
+    price: Number(closes[latestIndex].toFixed(4)),
+    currency: chart.meta?.currency || '',
+    observedAt: new Date(timestamps[latestIndex] * 1000).toISOString(),
+    sourceUrl: `https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}`,
+  };
+};
+
+export const applyCurrentQuoteGuard = (replies, notifications) => replies.map((reply) => {
+  const notification = notifications.find((item) =>
+    String(item.post.id) === String(reply.postId) && isCurrentPriceQuestion(item.questionToAnswer)
+  );
+
+  if (!notification) return reply;
+
+  const quote = notification.currentQuote;
+  if (!quote) {
+    return {
+      ...reply,
+      reply: 'Nie udało mi się zweryfikować aktualnej ceny na podstawie źródła z oznaczeniem czasu, więc nie będę zgadywać.',
+    };
+  }
+
+  const observedAt = new Date(quote.observedAt).toLocaleString('pl-PL', {
+    timeZone: 'Europe/Warsaw',
+    dateStyle: 'short',
+    timeStyle: 'medium',
+  });
+  const requestedAtMs = Date.parse(notification.searchResultsRetrievedAt);
+  const observedAtMs = Date.parse(quote.observedAt);
+  const isFresh = Number.isFinite(requestedAtMs) && Number.isFinite(observedAtMs)
+    && observedAtMs <= requestedAtMs + 5 * 60 * 1000
+    && requestedAtMs - observedAtMs <= 20 * 60 * 1000;
+  const observationLabel = isFresh ? 'notowanie' : 'ostatnie dostępne notowanie';
+  const formattedPrice = quote.price.toLocaleString('pl-PL', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: Math.abs(quote.price) < 1 ? 4 : 2,
+  });
+  return {
+    ...reply,
+    reply: `${quote.symbol}: ${formattedPrice} ${quote.currency} (${observationLabel} z ${observedAt}, Yahoo Finance).`,
+  };
+});

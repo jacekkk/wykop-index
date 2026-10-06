@@ -88,17 +88,17 @@ function App() {
         
         setSentimentData(parsedDocuments);
 
-        // Fetch historical data for last 90 days
+        // Fetch historical data for last 180 days
         try {
           const now = new Date();
-          // Get start of day 90 days ago to include all records from that day
-          const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-          ninetyDaysAgo.setUTCHours(0, 0, 0, 0);
+          // Get start of day 180 days ago to include all records from that day
+          const oneHundredEightyDaysAgo = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+          oneHundredEightyDaysAgo.setUTCHours(0, 0, 0, 0);
           const historicalResponse = await tablesDB.listRows({
             databaseId: DATABASE_ID,
             tableId: SENTIMENT_COLLECTION_ID,
             queries: [
-              Query.greaterThanEqual('$createdAt', ninetyDaysAgo.toISOString()),
+              Query.greaterThanEqual('$createdAt', oneHundredEightyDaysAgo.toISOString()),
               Query.orderAsc('$createdAt'),
               Query.limit(500)
             ]
@@ -134,13 +134,13 @@ function App() {
           }));
 
           // Extract yesterday's and week ago sentiment from averaged data
-          const nowUTC = new Date();
-          const yesterdayUTC = new Date(nowUTC.getTime() - 24 * 60 * 60 * 1000);
+          const reportDate = new Date(response.rows[0]?.$createdAt ?? now);
+          const yesterdayUTC = new Date(reportDate.getTime() - 24 * 60 * 60 * 1000);
           const yesterdayFormatted = formatUTCDate(yesterdayUTC);
           const yesterdayData = averagedData.find(item => item.date === yesterdayFormatted);
 
           // Extract yesterday's entries and week ago followers using UTC boundaries
-          const startOfTodayUTC = new Date(Date.UTC(nowUTC.getUTCFullYear(), nowUTC.getUTCMonth(), nowUTC.getUTCDate()));
+          const startOfTodayUTC = new Date(Date.UTC(reportDate.getUTCFullYear(), reportDate.getUTCMonth(), reportDate.getUTCDate()));
           const startOfYesterdayUTC = new Date(startOfTodayUTC.getTime() - 24 * 60 * 60 * 1000);
           const startOfWeekAgoUTC = new Date(startOfTodayUTC.getTime() - 7 * 24 * 60 * 60 * 1000);
           const endOfWeekAgoUTC = new Date(startOfWeekAgoUTC.getTime() + 24 * 60 * 60 * 1000);
@@ -378,7 +378,7 @@ function App() {
                 {/* Historical sentiment comparison */}
                 <div className="mt-4 flex flex-col gap-2 text-sm">
                   <div className="flex items-center gap-2">
-                    <span className="text-[#97979B]">Wczoraj:</span>
+                    <span className="text-[#97979B]">Dzień wcześniej:</span>
                     {comparisons.yesterdaySentiment !== null ? (
                       <>
                         <span 
@@ -476,7 +476,7 @@ function App() {
                             <div className="text-2xl font-bold text-[#2D2D31]">{item.followers.toLocaleString('pl-PL')}</div>
                             {comparisons.weekAgoFollowers !== null && (
                               <div className="text-sm mt-2">
-                                <span className="text-[#97979B]">Tydzień temu: </span>
+                                <span className="text-[#97979B]">Tydzień wcześniej: </span>
                                 <span className="font-semibold text-[#2D2D31]">{comparisons.weekAgoFollowers.toLocaleString('pl-PL')}</span>
                                 {item.followers !== comparisons.weekAgoFollowers && (
                                   <span className={`ml-1 font-semibold ${item.followers > comparisons.weekAgoFollowers ? 'text-[#008000]' : 'text-[#b91c1c]'}`}>
@@ -493,7 +493,7 @@ function App() {
                             <div className="text-2xl font-bold text-[#2D2D31]">{item.entriesLast24h.toLocaleString('pl-PL')}</div>
                             {comparisons.yesterdayEntries !== null && (
                               <div className="text-sm mt-2">
-                                <span className="text-[#97979B]">Wczoraj: </span>
+                                <span className="text-[#97979B]">Dzień wcześniej: </span>
                                 <span className="font-semibold text-[#2D2D31]">{comparisons.yesterdayEntries.toLocaleString('pl-PL')}</span>
                                 {item.entriesLast24h !== comparisons.yesterdayEntries && (
                                   <span className={`ml-1 font-semibold ${item.entriesLast24h > comparisons.yesterdayEntries ? 'text-[#008000]' : 'text-[#b91c1c]'}`}>
@@ -510,7 +510,7 @@ function App() {
                             <div className="text-2xl font-bold text-[#2D2D31]">{item.uniqueUsersLast24h.toLocaleString('pl-PL')}</div>
                             {comparisons.yesterdayUsers !== null && (
                               <div className="text-sm mt-2">
-                                <span className="text-[#97979B]">Wczoraj: </span>
+                                <span className="text-[#97979B]">Dzień wcześniej: </span>
                                 <span className="font-semibold text-[#2D2D31]">{comparisons.yesterdayUsers.toLocaleString('pl-PL')}</span>
                                 {item.uniqueUsersLast24h !== comparisons.yesterdayUsers && (
                                   <span className={`ml-1 font-semibold ${item.uniqueUsersLast24h > comparisons.yesterdayUsers ? 'text-[#008000]' : 'text-[#b91c1c]'}`}>
