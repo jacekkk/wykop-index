@@ -552,7 +552,7 @@ WAŻNE: Odpowiedz tylko samą analizą, bez żadnych dodatkowych komentarzy.`;
         ? `${(((uniqueUsersLast24h - yesterdayUserCount) / yesterdayUserCount) * 100) >= 0 ? '+' : ''}${Math.round((uniqueUsersLast24h - yesterdayUserCount) / yesterdayUserCount * 100)}%`
         : '';
       
-      const postContent = `[Krach & Śmieciuch Index](https://wykop-index.appwrite.network/) - stan na ${formattedDate}
+      const postContent = `**Krach & Śmieciuch Index** - stan na ${formattedDate}
 
 **${sentimentResult.sentiment}/100 ${emoji}** ${yesterdaySentiment !== null ? `(wczoraj: ${yesterdaySentiment})` : ''}
 
@@ -562,7 +562,7 @@ ${sentimentResult.summary}
 ${Array.isArray(mostDiscussed) && mostDiscussed.length > 0 ? mostDiscussed.slice(0, 3).map(topic => `🔥 [${topic.asset}](${topic.url}): ${topic.reasoning}`).join('\n') : ''}
 
 **Topowi analitycy:**
-${Array.isArray(topQuotes) && topQuotes.length > 0 ? topQuotes.slice(0, 3).map(user => `👤 @${user.username} (${user.sentiment}): [_"${user.quote.replace(/_/g, '\\_')}"_](${user.url})`).join('\n') : ''}
+${Array.isArray(topQuotes) && topQuotes.length > 0 ? topQuotes.slice(0, 3).map(user => `👤 @${user.username} (${user.sentiment}): "${user.quote}" ([wpis](${user.url}))`).join('\n') : ''}
 
 ${tomekVideoResult.analysis ? `\n**Tomkowe Kreski:**\n${tomekVideoResult.analysis} ([${tomekVideoResult.videoTitle}](${tomekVideoResult.videoUrl}))\n` : ''}
 
