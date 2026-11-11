@@ -1,0 +1,124 @@
+name: Run Appwrite Function
+
+on:
+  workflow_call:
+    inputs:
+      function:
+        description: Function to execute
+        required: true
+        type: string
+      retry_on_failure:
+        description: Retry on failure
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      APPWRITE_API_KEY:
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: appwrite-${{ inputs.function }}
+  cancel-in-progress: false
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      APPWRITE_ENDPOINT: ${{ vars.APPWRITE_ENDPOINT }}
+      APPWRITE_PROJECT_ID: ${{ vars.APPWRITE_PROJECT_ID }}
+      APPWRITE_FUNCTION_ID: ${{ inputs.function }}
+      APPWRITE_RETRY_ON_FAILURE: ${{ inputs.retry_on_failure }}
+    steps:
+      - name: Execute and wait for completion
+        uses: actions/github-script@v9
+        env:
+          APPWRITE_API_KEY: ${{ secrets.APPWRITE_API_KEY }}
+        with:
+          script: |
+            const { setTimeout: delay } = require('node:timers/promises');
+
+            async function runFunction({ endpoint, projectId, functionId, apiKey, retryOnFailure = false }) {
+              if (!endpoint || !projectId || !functionId || !apiKey) {
+                throw new Error('APPWRITE_ENDPOINT, APPWRITE_PROJECT_ID, APPWRITE_FUNCTION_ID and APPWRITE_API_KEY are required.');
+              }
+
+              const executionsUrl = `${endpoint.replace(/\/$/, '')}/functions/${encodeURIComponent(functionId)}/executions`;
+              const headers = {
+                'X-Appwrite-Project': projectId,
+                'X-Appwrite-Key': apiKey,
+                'Content-Type': 'application/json',
+              };
+
+              async function requestExecution(url, method) {
+                const response = await fetch(url, {
+                  method,
+                  headers,
+                  ...(method === 'POST' ? { body: JSON.stringify({ async: true, body: '{}' }) } : {}),
+                  signal: AbortSignal.timeout(30_000),
+                });
+                if (!response.ok) {
+                  const error = new Error(`Appwrite ${method} returned HTTP ${response.status}.`);
+                  error.retryable = response.status === 429 || response.status >= 500;
+                  throw error;
+                }
+                return response.json();
+              }
+
+              for (let attempt = 1; ; attempt++) {
+                core.info(`Starting ${functionId}, attempt ${attempt}.`);
+                let execution;
+                try {
+                  execution = await requestExecution(executionsUrl, 'POST');
+                } catch (error) {
+                  throw new Error('Submission could not be confirmed. Stopping to avoid duplicate executions; check Appwrite before retrying.', { cause: error });
+                }
+                if (!execution.$id) {
+                  throw new Error('Submission returned no execution ID. Check Appwrite before retrying.');
+                }
+
+                const executionUrl = `${executionsUrl}/${encodeURIComponent(execution.$id)}`;
+                core.info(`Waiting for execution ${execution.$id}.`);
+                while (true) {
+                  let result;
+                  try {
+                    result = await requestExecution(executionUrl, 'GET');
+                  } catch (error) {
+                    if (error.retryable === false) throw error;
+                    core.info('Could not read execution status; retrying the same execution in 10 seconds.');
+                    await delay(10_000);
+                    continue;
+                  }
+
+                  if (result.status === 'completed' && result.responseStatusCode >= 200 && result.responseStatusCode < 300) {
+                    core.info(`Execution ${execution.$id} succeeded (HTTP ${result.responseStatusCode}).`);
+                    return result;
+                  }
+                  if (result.status === 'failed' || result.status === 'completed') {
+                    core.info(`Execution ${execution.$id} failed: status=${result.status}, HTTP=${result.responseStatusCode}.`);
+                    if (!retryOnFailure) {
+                      throw new Error(`Execution ${execution.$id} failed. Retries are disabled for this function.`);
+                    }
+                    break;
+                  }
+                  if (!['waiting', 'processing', 'scheduled'].includes(result.status)) {
+                    throw new Error(`Unexpected execution status: ${result.status}. Check Appwrite before retrying.`);
+                  }
+                  await delay(10_000);
+                }
+
+                const retryDelay = Math.min(30_000 * 2 ** Math.min(attempt - 1, 4), 300_000);
+                core.info(`Retrying in ${retryDelay / 1000} seconds.`);
+                await delay(retryDelay);
+              }
+            }
+
+            return await runFunction({
+              endpoint: process.env.APPWRITE_ENDPOINT,
+              projectId: process.env.APPWRITE_PROJECT_ID,
+              functionId: process.env.APPWRITE_FUNCTION_ID,
+              apiKey: process.env.APPWRITE_API_KEY,
+              retryOnFailure: process.env.APPWRITE_RETRY_ON_FAILURE === 'true',
+            });

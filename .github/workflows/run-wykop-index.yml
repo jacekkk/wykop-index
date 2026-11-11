@@ -1,0 +1,17 @@
+name: Run wykop-index
+
+on:
+  schedule:
+    - cron: '10 19 * * 1-5'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  execute:
+    uses: ./.github/workflows/run-appwrite-function.yml
+    with:
+      function: ${{ vars.APPWRITE_WYKOP_INDEX_FUNCTION_ID }}
+      retry_on_failure: true
+    secrets:
+      APPWRITE_API_KEY: ${{ secrets.APPWRITE_API_KEY }}
