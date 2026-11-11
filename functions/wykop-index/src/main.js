@@ -246,7 +246,7 @@ export default async ({ req, res, log: baseLog, error }) => {
     }
 
     const prompt = `Przeanalizuj najnowsze wpisy z tagu #gielda na portalu wykop.pl i oszacuj obecny sentyment uzytkownikow w skali 1-100,
-    gdzie 1 to ekstremalnie bearish, a 100 to ekstremalnie bullish. Uzyj cytatow jako uzasadnienia.
+    gdzie 1 to ekstremalnie bearish (kapitulacja, wisielczy humor), a 100 to ekstremalnie bullish (hurraoptymizm, przechwałki). Uzyj cytatow jako uzasadnienia.
     
     Odpowiedz w nastepujacym formacie JSON:
     {

@@ -1,0 +1,16 @@
+name: Run wykop-post
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  execute:
+    uses: ./.github/workflows/run-appwrite-function.yml
+    with:
+      function: ${{ vars.APPWRITE_WYKOP_POST_FUNCTION_ID }}
+    secrets:
+      APPWRITE_API_KEY: ${{ secrets.APPWRITE_API_KEY }}
