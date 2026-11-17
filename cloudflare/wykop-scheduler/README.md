@@ -65,7 +65,9 @@ curl --get 'http://localhost:8787/__scheduled' --data-urlencode 'cron=*/5 * * * 
 
 Check for `scheduler_disabled` in the local Wrangler output. This verifies local
 Cron routing only, not Appwrite access. The automated tests use fake credentials
-and mocked HTTP responses and also cover both enabled cron routes.
+and mocked HTTP responses. They include six unit tests and two tests that run
+the enabled scheduled handler in the local Workers runtime, covering both cron
+routes and rejecting redirects without forwarding credentials.
 
 ## Activate Cloudflare scheduling
 

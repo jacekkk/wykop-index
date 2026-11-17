@@ -54,7 +54,9 @@ export async function runScheduled(controller, env, { fetchImpl = fetch, logger 
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ async: true, body: '{}' }),
-      redirect: 'error',
+      // Workers supports "manual" and "follow" only. Reject 3xx below without
+      // forwarding the Appwrite key to another URL.
+      redirect: 'manual',
       signal: AbortSignal.timeout(30_000),
     });
   } catch {
