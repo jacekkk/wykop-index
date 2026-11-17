@@ -2,12 +2,12 @@ import { INDEX_CRON, executionRequest, runScheduled } from './scheduler.js';
 
 export const RETRY_DELAY_MS = 10 * 60_000;
 export const POLL_DELAY_MS = 30_000;
-export const MAX_ATTEMPTS = 6; // Initial execution plus five retries.
+export const MAX_ATTEMPTS = 11; // Initial execution plus ten retries.
 const INDEX_VARIABLE = 'APPWRITE_WYKOP_INDEX_FUNCTION_ID';
 const WATCHDOG_MS = 60_000;
 
 // Kept independent of the Worker adapter so tests can advance a clock without
-// waiting through an hour of real retries. Production storage is SQLite-backed.
+// waiting through real retry delays. Production storage is SQLite-backed.
 export class IndexRun {
   constructor(storage, env, { now = Date.now, fetchImpl = fetch, logger = console } = {}) {
     this.storage = storage;
@@ -52,6 +52,14 @@ export class IndexRun {
     const previous = await this.status();
     if (previous) {
       if (previous.runId !== runId) throw new Error('Run identity does not match this coordinator.');
+      if (previous.phase === 'exhausted' && previous.attempt < MAX_ATTEMPTS && previous.executionId) {
+        // A higher retry limit can reopen an exhausted run, preserving its
+        // count and rechecking the last execution before any new submission.
+        const resumed = { ...previous, phase: 'polling', nextActionAt: this.now() };
+        await this.save(resumed);
+        this.log('index_retry_budget_increased', resumed, { maxAttempts: MAX_ATTEMPTS });
+        return resumed;
+      }
       return previous;
     }
     // Validate before recording a run. Pin public configuration for all retries;
