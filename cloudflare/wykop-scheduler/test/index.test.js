@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import worker from '../src/index.js';
+import worker, { dispatchScheduled } from '../src/worker.js';
 import { INDEX_CRON, POST_CRON, runScheduled } from '../src/scheduler.js';
 
 const env = {
@@ -159,9 +159,29 @@ test('deployment configuration matches Appwrite and GitHub workflows allow only 
   assert.ok(['true', 'false'].includes(config.vars.SCHEDULER_ENABLED));
   assert.equal(config.workers_dev, false);
   assert.equal(config.preview_urls, false);
+  assert.deepEqual(config.durable_objects.bindings, [{ name: 'INDEX_RETRIES', class_name: 'IndexRetryCoordinator' }]);
+  assert.deepEqual(config.migrations, [{ tag: 'v1', new_sqlite_classes: ['IndexRetryCoordinator'] }]);
   for (const name of ['wykop-index', 'wykop-post']) {
     const workflow = await readFile(new URL(`../../../.github/workflows/run-${name}.yml`, import.meta.url), 'utf8');
     assert.match(workflow, /^  workflow_dispatch:/m);
     assert.doesNotMatch(workflow, /^  schedule:/m);
   }
+});
+
+test('index cron selects one durable run per UTC date', async (t) => {
+  const calls = [];
+  t.mock.method(console, 'info', () => {});
+  const config = {
+    ...env,
+    INDEX_RETRIES: {
+      getByName(name) {
+        return { start: async (scheduledTime) => { calls.push({ name, scheduledTime }); return { phase: 'ready', attempt: 0 }; } };
+      },
+    },
+  };
+  const scheduledTime = Date.parse('2026-11-17T19:10:00Z');
+  await dispatchScheduled({ cron: INDEX_CRON, scheduledTime }, config);
+  assert.deepEqual(calls, [{ name: 'wykop-index:2026-11-17', scheduledTime }]);
+  await assert.rejects(dispatchScheduled({ cron: INDEX_CRON, scheduledTime: NaN }, config), /Invalid scheduled time/);
+  assert.equal(calls.length, 1);
 });

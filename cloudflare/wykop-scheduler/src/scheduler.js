@@ -26,6 +26,17 @@ function executionsUrl(endpoint, functionId) {
   return `${url.href.replace(/\/+$/, '')}/functions/${encodeURIComponent(functionId)}/executions`;
 }
 
+export function executionRequest(env, variable) {
+  return {
+    url: executionsUrl(required(env, 'APPWRITE_ENDPOINT'), required(env, variable)),
+    headers: {
+      'X-Appwrite-Project': required(env, 'APPWRITE_PROJECT_ID'),
+      'X-Appwrite-Key': required(env, 'APPWRITE_API_KEY'),
+      'Content-Type': 'application/json',
+    },
+  };
+}
+
 export async function runScheduled(controller, env, { fetchImpl = fetch, logger = console } = {}) {
   const job = jobs.get(controller.cron);
   if (!job) throw new Error('Unsupported scheduled cron. Check the Worker configuration.');
@@ -38,21 +49,13 @@ export async function runScheduled(controller, env, { fetchImpl = fetch, logger 
     throw new Error('SCHEDULER_ENABLED must be "true" or "false".');
   }
 
-  const endpoint = required(env, 'APPWRITE_ENDPOINT');
-  const projectId = required(env, 'APPWRITE_PROJECT_ID');
-  const functionId = required(env, job.variable);
-  const apiKey = required(env, 'APPWRITE_API_KEY');
-  const url = executionsUrl(endpoint, functionId);
+  const { url, headers } = executionRequest(env, job.variable);
 
   let response;
   try {
     response = await fetchImpl(url, {
       method: 'POST',
-      headers: {
-        'X-Appwrite-Project': projectId,
-        'X-Appwrite-Key': apiKey,
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({ async: true, body: '{}' }),
       // Workers supports "manual" and "follow" only. Reject 3xx below without
       // forwarding the Appwrite key to another URL.
