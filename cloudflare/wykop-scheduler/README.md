@@ -12,8 +12,8 @@ triggers have been removed; both workflows retain `workflow_dispatch` for manual
 Cloudflare Cron Triggers use UTC; daylight saving time does not shift these times.
 At 19:10 on weekdays both functions are submitted independently, without ordering.
 
-`wykop-index` is monitored and retried up to **five times**, with a **10-minute
-delay after each confirmed failure** (six executions maximum including the first).
+`wykop-index` is monitored and retried up to **ten times**, with a **10-minute
+delay after each confirmed failure** (eleven executions maximum including the first).
 `wykop-post` continues to submit once per five-minute cron event, without retries.
 
 ## Configuration
@@ -120,7 +120,7 @@ does not cancel executions already submitted.
   every 30 seconds. `completed` with HTTP 2xx succeeds and stops the run. `failed`
   or `completed` with any other HTTP status counts as a confirmed failure.
 - A failed attempt schedules the next submission for 10 minutes after the failure
-  is observed. There are five retries after the first attempt: six executions
+  is observed. There are ten retries after the first attempt: eleven executions
   maximum. The delay starts after failure, rather than blindly starting jobs at
   19:20/19:30 while an earlier 15-minute execution might still be running.
 - While Appwrite reports `waiting`, `processing`, or `scheduled`, the coordinator
@@ -133,14 +133,19 @@ does not cancel executions already submitted.
   Worker preserves the attempt count, execution ID, and retry time. A crash during
   an unconfirmed POST stops that run as `uncertain`; it never automatically sends
   the POST again. Inspect Appwrite before manually retrying such a run.
+- After increasing the retry limit, an exhausted run with remaining budget can
+  be resumed through its internal `start(originalScheduledTime)` RPC. This keeps
+  the attempt count and rechecks the last execution before scheduling another
+  ten-minute delay. Redeploying alone does not resume an already exhausted run.
 - `SCHEDULER_ENABLED: "false"` pauses pending attempts as well as new cron
   submissions. Paused index runs recheck the flag every 10 minutes. Re-enabling
   resumes persisted work; it does not reset the attempt count or cancel an
   execution already running in Appwrite.
 - Logs include `index_run_scheduled`, `index_retry_scheduled`,
   `index_execution_succeeded`, `index_retries_exhausted`,
-  `index_execution_read_failed`, and `index_submission_uncertain`. After six
-  failures, the run stops and the next weekday starts its own run.
+  `index_execution_read_failed`, `index_retry_budget_increased`, and
+  `index_submission_uncertain`. After eleven failures, the run stops and the next
+  weekday starts its own run.
 
 ## Behavior and limitations
 
@@ -149,8 +154,8 @@ does not cancel executions already submitted.
   using `X-Appwrite-Project` and `X-Appwrite-Key`. An accepted response must include
   an execution ID. The request times out after 30 seconds.
 - Index completion polling and delays use persisted alarms instead of keeping
-  a Worker invocation alive for an hour. Post executions are not monitored or
-  retried. Appwrite's function timeouts (900 seconds for index, 300 for post) are
+  a Worker invocation alive for the entire retry window. Post executions are not
+  monitored or retried. Appwrite's function timeouts (900 seconds for index, 300 for post) are
   unchanged; long-running work continues in Appwrite after a Worker event exits.
 - There are no automatic submission retries, including after HTTP 429/5xx,
   timeouts, malformed responses, or redirects. The scheduled handler calls
@@ -180,4 +185,4 @@ does not cancel executions already submitted.
 | Submitted execution later fails | Inspect its Appwrite execution logs and function environment variables; successful submission does not mean successful execution. |
 | `index_execution_read_failed` | Check Appwrite availability and the `execution.read` scope. The coordinator keeps the same execution ID and does not submit a retry while its outcome is unknown. |
 | `index_submission_uncertain` | Inspect Appwrite manually; the run has stopped to avoid duplicating an unconfirmed submission. |
-| `index_retries_exhausted` | All six index attempts failed. Inspect the last Appwrite execution; no more retries are scheduled for that day's run. |
+| `index_retries_exhausted` | All eleven index attempts failed. Inspect the last Appwrite execution; no more retries are scheduled for that day's run. |

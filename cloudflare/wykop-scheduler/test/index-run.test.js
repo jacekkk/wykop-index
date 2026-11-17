@@ -62,18 +62,18 @@ test('index succeeds once and duplicate starts or alarms never resubmit it', asy
   assert.ok(!JSON.stringify([...h.values]).includes(h.env.APPWRITE_API_KEY));
 });
 
-test('index makes exactly five retries, ten minutes after each confirmed failure', async () => {
+test('index makes exactly ten retries, ten minutes after each confirmed failure', async () => {
   const h = harness(({ request, posts }) => Response.json(request.method === 'POST'
     ? { $id: `execution-${posts}` }
     : { $id: `execution-${posts}`, status: posts % 2 ? 'failed' : 'completed', responseStatusCode: 500 }));
   await h.run.start(scheduledTime);
-  assert.equal(MAX_ATTEMPTS, 6);
-  for (let attempt = 1; attempt <= 6; attempt++) {
+  assert.equal(MAX_ATTEMPTS, 11);
+  for (let attempt = 1; attempt <= 11; attempt++) {
     const submitted = await h.fire(h.makeRun());
     assert.equal(submitted.attempt, attempt);
     assert.equal(h.postCount(), attempt);
     const failed = await h.fire(h.makeRun());
-    if (attempt < 6) {
+    if (attempt < 11) {
       assert.equal(failed.phase, 'retry_wait');
       assert.equal(h.storage.alarm, h.clock.now + 600_000);
       h.clock.now = h.storage.alarm - 1;
@@ -86,8 +86,41 @@ test('index makes exactly five retries, ten minutes after each confirmed failure
   }
   await h.makeRun().alarm();
   await h.makeRun().start(scheduledTime);
-  assert.equal(h.postCount(), 6);
-  assert.equal(h.logs.filter((log) => log.event === 'index_retry_scheduled').length, 5);
+  assert.equal(h.postCount(), 11);
+  assert.equal(h.logs.filter((log) => log.event === 'index_retry_scheduled').length, 10);
+});
+
+test('a raised limit resumes an exhausted run with only its remaining retries', async () => {
+  const h = harness(({ request, posts }) => Response.json(request.method === 'POST'
+    ? { $id: `execution-${6 + posts}` }
+    : { $id: `execution-${6 + posts}`, status: 'failed', responseStatusCode: 500 }));
+  const initial = await h.run.start(scheduledTime);
+  await h.storage.put('run', { ...initial, attempt: 6, phase: 'exhausted', executionId: 'execution-6', nextActionAt: null });
+  await h.storage.deleteAlarm();
+  h.clock.now += 2 * 60 * 60_000;
+
+  const resumed = await h.makeRun().start(scheduledTime);
+  assert.equal(resumed.attempt, 6);
+  assert.equal(resumed.phase, 'polling');
+  assert.equal(resumed.executionId, 'execution-6');
+  assert.equal(h.calls.length, 0, 'resuming must not submit immediately');
+  assert.equal((await h.fire()).phase, 'retry_wait');
+  assert.equal(h.calls[0].method, 'GET');
+  assert.ok(h.calls[0].url.endsWith('/execution-6'));
+  assert.equal(h.storage.alarm, h.clock.now + RETRY_DELAY_MS);
+  const retryAt = h.storage.alarm;
+  await h.makeRun().start(scheduledTime);
+  assert.equal(h.storage.alarm, retryAt, 'duplicate starts must preserve the delay');
+
+  for (let attempt = 7; attempt <= 11; attempt++) {
+    assert.equal((await h.fire(h.makeRun())).attempt, attempt);
+    await h.fire(h.makeRun());
+  }
+  assert.equal((await h.run.status()).phase, 'exhausted');
+  assert.equal(h.postCount(), 5);
+  assert.equal(h.storage.alarm, null);
+  await h.makeRun().start(scheduledTime);
+  assert.equal(h.storage.alarm, null);
 });
 
 test('a successful retry cancels the remaining attempts', async () => {
