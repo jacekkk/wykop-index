@@ -19,10 +19,11 @@ At 19:10 on weekdays both functions are submitted independently, without orderin
 `APPWRITE_ENDPOINT` must be an HTTPS API base URL including `/v1`, without URL
 credentials, a query, or a fragment. Redirects are rejected to protect the API key.
 
-`SCHEDULER_ENABLED` is initially `"false"` so the Worker can be deployed and its
-secret configured before submissions start. Only the exact string
-`"true"` enables submissions. Disabled invocations log `scheduler_disabled` and
-do not require an Appwrite key.
+`SCHEDULER_ENABLED` is `"true"` for the configured production Worker. For a new
+installation, set it to `"false"` before the first deployment so you can configure
+the secret before submissions start. Only the exact string `"true"` enables
+submissions. Disabled invocations log `scheduler_disabled` and do not require an
+Appwrite key.
 
 Store `APPWRITE_API_KEY` as a Cloudflare Worker secret. Use an Appwrite project
 API key with the `execution.write` scope and an appropriate expiry date; the key
@@ -36,6 +37,9 @@ Requirements: Node.js 22 or newer, npm, and a Cloudflare account with Workers
 permissions. Wrangler 4 is included as a development dependency and locked in
 `package-lock.json`.
 
+For a new installation, first set `SCHEDULER_ENABLED` to `"false"` as described
+above. Keep an existing production installation enabled when redeploying it.
+
 ```sh
 cd cloudflare/wykop-scheduler
 npm ci
@@ -48,12 +52,12 @@ npx wrangler secret put APPWRITE_API_KEY
 
 The last command securely prompts for the key. At this point cron events are
 configured, but submissions remain disabled. No Appwrite function runs as part
-of tests, bundle validation, or deployment with the default configuration.
+of tests, bundle validation, or deployment with submissions disabled.
 `workers_dev` and preview URLs are disabled, and HTTP requests return 404; there
 is no HTTP endpoint for manually running production functions.
 
-For local event routing without creating executions, keep the disabled default,
-run `npm run dev`, then in another terminal:
+For local event routing without creating executions, set `SCHEDULER_ENABLED` to
+`"false"`, run `npm run dev`, then in another terminal:
 
 ```sh
 curl --get 'http://localhost:8787/__scheduled' --data-urlencode 'cron=*/5 * * * *'
@@ -61,7 +65,9 @@ curl --get 'http://localhost:8787/__scheduled' --data-urlencode 'cron=*/5 * * * 
 
 Check for `scheduler_disabled` in the local Wrangler output. This verifies local
 Cron routing only, not Appwrite access. The automated tests use fake credentials
-and mocked HTTP responses and also cover both enabled cron routes.
+and mocked HTTP responses. They include six unit tests and two tests that run
+the enabled scheduled handler in the local Workers runtime, covering both cron
+routes and rejecting redirects without forwarding credentials.
 
 ## Activate Cloudflare scheduling
 

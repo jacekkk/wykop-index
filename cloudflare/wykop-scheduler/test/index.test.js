@@ -49,7 +49,7 @@ test('both crons submit the correct asynchronous Appwrite execution', async () =
       'Content-Type': 'application/json',
     });
     assert.deepEqual(JSON.parse(request.body), { async: true, body: '{}' });
-    assert.equal(request.redirect, 'error');
+    assert.equal(request.redirect, 'manual');
     assert.ok(request.signal instanceof AbortSignal);
     assert.equal(request.signal.aborted, false);
     assert.deepEqual(h.logs, [{
