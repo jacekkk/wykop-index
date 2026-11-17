@@ -1,8 +1,6 @@
 name: Run wykop-index
 
 on:
-  schedule:
-    - cron: '10 19 * * 1-5'
   workflow_dispatch:
 
 permissions: {}
