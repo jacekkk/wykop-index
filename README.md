@@ -32,7 +32,7 @@ appwrite push sites # update frontend
 Harmonogram Cloudflare Workers (konfiguracja, testy i instrukcja wdrożenia):
 [cloudflare/wykop-scheduler](cloudflare/wykop-scheduler/README.md).
 Harmonogramy GitHub Actions są wyłączone; uruchomienia ręczne pozostają dostępne.
-Worker wymaga wdrożenia, ustawienia sekretu Appwrite i włączenia zgodnie z instrukcją.
-Do tego czasu funkcje nie będą uruchamiane automatycznie.
+Worker jest włączony w skonfigurowanym środowisku produkcyjnym. Konfigurując nowe
+konto, najpierw wyłącz wysyłanie wykonań i ustaw sekret Appwrite zgodnie z instrukcją.
 
 Projekt edukacyjno-rozrywkowy. Nie inwestuj na podstawie sentymentu z wykop.pl ani TomekIndicator®.
