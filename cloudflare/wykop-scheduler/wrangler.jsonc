@@ -11,6 +11,10 @@
   "triggers": {
     "crons": ["10 19 * * 1-5", "*/5 * * * *"]
   },
+  "durable_objects": {
+    "bindings": [{ "name": "INDEX_RETRIES", "class_name": "IndexRetryCoordinator" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["IndexRetryCoordinator"] }],
   "vars": {
     "SCHEDULER_ENABLED": "true",
     "APPWRITE_ENDPOINT": "https://fra.cloud.appwrite.io/v1",
