@@ -1,0 +1,89 @@
+export const INDEX_CRON = '10 19 * * 1-5';
+export const POST_CRON = '*/5 * * * *';
+
+const jobs = new Map([
+  [INDEX_CRON, { name: 'wykop-index', variable: 'APPWRITE_WYKOP_INDEX_FUNCTION_ID' }],
+  [POST_CRON, { name: 'wykop-post', variable: 'APPWRITE_WYKOP_POST_FUNCTION_ID' }],
+]);
+
+function required(env, name) {
+  if (typeof env[name] !== 'string' || !env[name].trim()) {
+    throw new Error(`${name} is required.`);
+  }
+  return env[name].trim();
+}
+
+function executionsUrl(endpoint, functionId) {
+  let url;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    throw new Error('APPWRITE_ENDPOINT must be an HTTPS URL without credentials, query, or fragment.');
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
+    throw new Error('APPWRITE_ENDPOINT must be an HTTPS URL without credentials, query, or fragment.');
+  }
+  return `${url.href.replace(/\/+$/, '')}/functions/${encodeURIComponent(functionId)}/executions`;
+}
+
+export async function runScheduled(controller, env, { fetchImpl = fetch, logger = console } = {}) {
+  const job = jobs.get(controller.cron);
+  if (!job) throw new Error('Unsupported scheduled cron. Check the Worker configuration.');
+
+  if (env.SCHEDULER_ENABLED === 'false') {
+    logger.info(JSON.stringify({ event: 'scheduler_disabled', cron: controller.cron }));
+    return;
+  }
+  if (env.SCHEDULER_ENABLED !== 'true') {
+    throw new Error('SCHEDULER_ENABLED must be "true" or "false".');
+  }
+
+  const endpoint = required(env, 'APPWRITE_ENDPOINT');
+  const projectId = required(env, 'APPWRITE_PROJECT_ID');
+  const functionId = required(env, job.variable);
+  const apiKey = required(env, 'APPWRITE_API_KEY');
+  const url = executionsUrl(endpoint, functionId);
+
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      method: 'POST',
+      headers: {
+        'X-Appwrite-Project': projectId,
+        'X-Appwrite-Key': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ async: true, body: '{}' }),
+      redirect: 'error',
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch {
+    // A timeout or connection error does not prove Appwrite rejected the request.
+    // Never resubmit automatically: these functions publish to Wykop.
+    throw new Error(`${job.name}: submission could not be confirmed. Check Appwrite before retrying; no automatic retry was attempted.`);
+  }
+
+  if (!response.ok) {
+    // Do not log the response body: upstream errors can contain sensitive data.
+    throw new Error(`${job.name}: Appwrite returned HTTP ${response.status}. Check Appwrite before retrying; no automatic retry was attempted.`);
+  }
+
+  let execution;
+  try {
+    execution = await response.json();
+  } catch {
+    throw new Error(`${job.name}: submission returned invalid JSON. Check Appwrite before retrying.`);
+  }
+  if (typeof execution?.$id !== 'string' || !execution.$id.trim()) {
+    throw new Error(`${job.name}: submission returned no execution ID. Check Appwrite before retrying.`);
+  }
+
+  const result = { functionName: job.name, executionId: execution.$id };
+  logger.info(JSON.stringify({
+    event: 'appwrite_execution_submitted',
+    ...result,
+    cron: controller.cron,
+    scheduledTime: controller.scheduledTime,
+  }));
+  return result;
+}
