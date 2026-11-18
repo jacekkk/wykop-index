@@ -1,0 +1,33 @@
+name: Test function AI providers
+
+on:
+  pull_request:
+    paths:
+      - functions/**
+      - .github/workflows/test-functions.yml
+      - .github/workflows/deploy-functions.yml
+  push:
+    branches: [main]
+    paths:
+      - functions/**
+      - .github/workflows/test-functions.yml
+      - .github/workflows/deploy-functions.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Test provider fallback and response contracts
+        run: node --test functions/test/*.test.mjs
+      - name: Check function entrypoints
+        run: |
+          node --check functions/wykop-index/src/main.js
+          node --check functions/wykop-post/src/main.js
