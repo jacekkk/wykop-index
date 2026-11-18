@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { generateJson as indexGenerate, DEFAULT_OPENROUTER_MODEL } from '../wykop-index/src/ai-provider.js';
 import { generateJson as postGenerate } from '../wykop-post/src/ai-provider.js';
@@ -136,9 +139,32 @@ for (const [name, generate, schema, value, parse] of [
 }
 
 test('both Appwrite upload directories include the same standalone provider adapter', async () => {
-  const paths = ['wykop-index', 'wykop-post'].map(name => new URL(`../${name}/src/ai-provider.js`, import.meta.url));
-  assert.equal(await readFile(paths[0], 'utf8'), await readFile(paths[1], 'utf8'));
+  for (const file of ['ai-provider.js', 'deployment-model.js']) {
+    const paths = ['wykop-index', 'wykop-post'].map(name => new URL(`../${name}/src/${file}`, import.meta.url));
+    assert.equal(await readFile(paths[0], 'utf8'), await readFile(paths[1], 'utf8'));
+  }
 });
+
+for (const name of ['wykop-index', 'wykop-post']) {
+  test(`${name}: deployed GitHub model takes precedence over an older Appwrite environment value`, async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'wykop-deployed-model-'));
+    try {
+      await writeFile(join(dir, 'package.json'), '{"type":"module"}');
+      await copyFile(new URL(`../${name}/src/ai-provider.js`, import.meta.url), join(dir, 'ai-provider.js'));
+      await writeFile(join(dir, 'deployment-model.js'), `export default ${JSON.stringify('deployed/model:free')};\n`);
+      const { generateJson } = await import(pathToFileURL(join(dir, 'ai-provider.js')).href);
+      const requests = [];
+      assert.deepEqual(await generateJson({
+        prompt: 'Test', systemInstruction: 'Return JSON.', responseSchema: { type: 'object' },
+        parseResponse: JSON.parse,
+        env: { OPENROUTER_API_KEY: 'fake-key', OPENROUTER_MODEL: 'old/model:free' },
+        fetchImpl: async (_url, request) => { requests.push(JSON.parse(request.body)); return completion({ ok: true }); },
+        generateGemini: async () => assert.fail('unexpected fallback'),
+      }), { ok: true });
+      assert.equal(requests[0].model, 'deployed/model:free');
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+}
 
 test('sentiment validation rejects missing nested fields before database or posting work', () => {
   assert.throws(() => parseSentimentResponse(JSON.stringify({ ...sentiment, topQuotes: [{ username: 'user' }] })), /Invalid sentiment/);

@@ -5,13 +5,13 @@ on:
     paths:
       - functions/**
       - .github/workflows/test-functions.yml
-      - .github/workflows/apply-openrouter-model.yml
+      - .github/workflows/deploy-functions.yml
   push:
     branches: [main]
     paths:
       - functions/**
       - .github/workflows/test-functions.yml
-      - .github/workflows/apply-openrouter-model.yml
+      - .github/workflows/deploy-functions.yml
   workflow_dispatch:
 
 permissions:

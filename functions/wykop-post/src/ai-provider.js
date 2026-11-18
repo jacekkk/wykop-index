@@ -1,3 +1,5 @@
+import deploymentModel from './deployment-model.js';
+
 export const DEFAULT_OPENROUTER_MODEL = 'baidu/ernie-5.5-flash-preview:free';
 export const OPENROUTER_TIMEOUT_MS = 45_000;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -5,7 +7,7 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 class ProviderError extends Error {}
 
 export function resolveOpenRouterModel(env = process.env) {
-  const model = env.OPENROUTER_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL;
+  const model = (deploymentModel ?? env.OPENROUTER_MODEL)?.trim() || DEFAULT_OPENROUTER_MODEL;
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]*:free$/.test(model)) {
     throw new Error('OPENROUTER_MODEL must name a free model ending in :free.');
   }
