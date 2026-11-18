@@ -67,6 +67,12 @@ for (const [name, generate, schema, value, parse] of [
     }
   });
 
+  test(`${name}: the configured model value is trimmed and sent to OpenRouter`, async () => {
+    const h = harness({ env: { OPENROUTER_API_KEY: 'fake-key', OPENROUTER_MODEL: ' other/model:free ' } });
+    await h.run();
+    assert.equal(JSON.parse(h.requests[0].body).model, 'other/model:free');
+  });
+
   test(`${name}: HTTP failures, redirects, embedded errors, refusals, and timeouts fall back once`, async () => {
     const failures = [
       ...[401, 402, 403, 404, 429, 500, 503].map(status => () => new Response('private upstream body', { status })),

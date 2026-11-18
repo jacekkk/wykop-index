@@ -5,11 +5,13 @@ on:
     paths:
       - functions/**
       - .github/workflows/test-functions.yml
+      - .github/workflows/apply-openrouter-model.yml
   push:
     branches: [main]
     paths:
       - functions/**
       - .github/workflows/test-functions.yml
+      - .github/workflows/apply-openrouter-model.yml
   workflow_dispatch:
 
 permissions:
@@ -24,7 +26,7 @@ jobs:
         with:
           node-version: '22'
       - name: Test provider fallback and response contracts
-        run: node --test functions/test/ai-providers.test.mjs
+        run: node --test functions/test/*.test.mjs
       - name: Check function entrypoints
         run: |
           node --check functions/wykop-index/src/main.js

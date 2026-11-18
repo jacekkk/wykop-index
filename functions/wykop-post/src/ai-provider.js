@@ -4,6 +4,14 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 class ProviderError extends Error {}
 
+export function resolveOpenRouterModel(env = process.env) {
+  const model = env.OPENROUTER_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL;
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]*:free$/.test(model)) {
+    throw new Error('OPENROUTER_MODEL must name a free model ending in :free.');
+  }
+  return model;
+}
+
 // This file is also packaged inside wykop-post: Appwrite uploads each function
 // directory independently. The contract tests check that both copies agree.
 export async function generateJson({
@@ -28,10 +36,7 @@ export async function generateJson({
   }
   if (!key) throw new Error('OPENROUTER_API_KEY is required when AI_PROVIDER=openrouter.');
 
-  const model = env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL;
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]*:free$/.test(model)) {
-    throw new Error('OPENROUTER_MODEL must name a free model ending in :free.');
-  }
+  const model = resolveOpenRouterModel(env);
 
   try {
     log(`Using OpenRouter model ${model}.`);

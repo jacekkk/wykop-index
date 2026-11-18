@@ -1,0 +1,33 @@
+name: Apply OpenRouter model
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: appwrite-openrouter-model
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Apply repository model variable to both Appwrite functions
+        env:
+          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
+          APPWRITE_ENDPOINT: ${{ vars.APPWRITE_ENDPOINT }}
+          APPWRITE_PROJECT_ID: ${{ vars.APPWRITE_PROJECT_ID }}
+          APPWRITE_WYKOP_INDEX_FUNCTION_ID: ${{ vars.APPWRITE_WYKOP_INDEX_FUNCTION_ID }}
+          APPWRITE_WYKOP_POST_FUNCTION_ID: ${{ vars.APPWRITE_WYKOP_POST_FUNCTION_ID }}
+          APPWRITE_FUNCTIONS_API_KEY: ${{ secrets.APPWRITE_FUNCTIONS_API_KEY }}
+        run: node functions/scripts/apply-openrouter-model.mjs

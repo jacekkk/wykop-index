@@ -16,7 +16,7 @@ them or paste them into a pull request.
 | --- | --- |
 | `OPENROUTER_API_KEY` | An OpenRouter API key. Required to activate OpenRouter. |
 | `AI_PROVIDER` | Set to `openrouter` for explicit activation; `gemini` forces rollback. When unset, OpenRouter is selected if its key exists, otherwise Gemini is used. |
-| `OPENROUTER_MODEL` | Optional; defaults to `baidu/ernie-5.5-flash-preview:free`. Only IDs ending in `:free` are accepted. |
+| `OPENROUTER_MODEL` | Runtime model selector, synced from the GitHub repository variable using the workflow below. Defaults to `baidu/ernie-5.5-flash-preview:free`; only `:free` models are accepted. |
 | `GEMINI_API_KEY` | Retain for inference fallback and Gemini media/URL processing. |
 | `GEMINI_BACKUP_API_KEY` | Optional second Gemini key for `wykop-post`. When absent, the primary key is reused. |
 | `GEMINI_MODEL` | Optional; defaults to `gemini-3.8-flash`. |
@@ -32,6 +32,37 @@ existing Appwrite deployment process. For verification, inspect provider logs an
 submission to Appwrite alone does not establish successful posting. For quality
 evaluation, compare the same saved Wykop batch across models without running the
 posting handlers.
+
+## Set the model from GitHub
+
+Deploy the reviewed provider-support code to both Appwrite functions first. The
+configuration workflow rebuilds their active code; it does not upload new source.
+
+1. In **Settings > Secrets and variables > Actions > Variables**, create the
+   repository variable **`OPENROUTER_MODEL`**, for example
+   `baidu/ernie-5.5-flash-preview:free`.
+2. On the **Secrets** tab of the same settings page, add **`APPWRITE_FUNCTIONS_API_KEY`**: an Appwrite
+   project API key with `functions.read` and `functions.write`. This is separate
+   from the execution-only scheduler key. The OpenRouter key stays in Appwrite.
+3. Retain the existing repository variables `APPWRITE_ENDPOINT`,
+   `APPWRITE_PROJECT_ID`, `APPWRITE_WYKOP_INDEX_FUNCTION_ID`, and
+   `APPWRITE_WYKOP_POST_FUNCTION_ID`, pointing to the deployed functions.
+4. Run **Actions > Apply OpenRouter model > Run workflow** on the default branch.
+
+The workflow upserts only the model variable, rebuilds the currently active code
+with the new environment, waits for successful builds, and verifies activation.
+Appwrite requires a redeployment for environment-variable changes. Subsequent
+executions from Cloudflare, GitHub's manual workflows, and other Appwrite callers
+all use that deployed value. Neither function is invoked by this workflow, and
+cron settings and existing API-key variables are not changed.
+
+Editing the GitHub variable alone does **not** update running functions: rerun
+the apply workflow after each change. An empty/unset variable restores the
+adapter's default model. The two functions are updated sequentially; if the
+second fails, the first may already have the new model. Inspect the failed run
+and rerun the workflow to finish applying the same value.
+
+Reference: [Appwrite environment variables and redeployment](https://appwrite.io/docs/products/functions/environment-variables).
 
 ## Search, attachments, and response handling
 
@@ -78,7 +109,7 @@ References: [OpenRouter free limits](https://openrouter.ai/collections/free-mode
 With Node.js 22 or newer, run from the repository root:
 
 ```sh
-node --test functions/test/ai-providers.test.mjs
+node --test functions/test/*.test.mjs
 node --check functions/wykop-index/src/main.js
 node --check functions/wykop-post/src/main.js
 ```
@@ -86,7 +117,9 @@ node --check functions/wykop-post/src/main.js
 The tests use mocked inference and do not publish Wykop replies or contact paid
 services. They cover both adapters, free request routing, provider failures,
 response contracts, media routing, and preservation of the current-price guard.
-They do not measure Polish model quality or live provider availability.
+They also cover model application using mocked Appwrite configuration and
+deployment APIs. They do not measure Polish model quality or live provider
+availability, and the apply workflow has not been run against production.
 
 `ai-provider.js` is intentionally included in each function directory because
 Appwrite uploads those directories independently. The tests check both copies
