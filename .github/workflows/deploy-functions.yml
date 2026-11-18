@@ -29,7 +29,7 @@ jobs:
           node-version: '22'
       - name: Test functions before deployment
         run: node --test functions/test/*.test.mjs
-      - name: Package the configured OpenRouter model
+      - name: Package the configured OpenRouter model for sentiment analysis
         env:
           OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
         run: |
@@ -37,10 +37,8 @@ jobs:
           import { writeFile } from 'node:fs/promises';
           import { resolveOpenRouterModel } from './functions/wykop-index/src/ai-provider.js';
           const model = resolveOpenRouterModel();
-          for (const name of ['wykop-index', 'wykop-post']) {
-            await writeFile(`functions/${name}/src/deployment-model.js`, `export default ${JSON.stringify(model)};\n`);
-          }
-          console.log(`Deploying both functions with OPENROUTER_MODEL=${model}`);
+          await writeFile('functions/wykop-index/src/deployment-model.js', `export default ${JSON.stringify(model)};\n`);
+          console.log(`Deploying wykop-index sentiment analysis with OPENROUTER_MODEL=${model}; mentions and Tomek videos use Gemini`);
           NODE
       - name: Install Appwrite CLI
         run: npm install --global appwrite-cli@28.13.3

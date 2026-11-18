@@ -1,31 +1,35 @@
 # AI providers for the Appwrite functions
 
-Both functions can use OpenRouter's `baidu/ernie-5.5-flash-preview:free` for
-structured text generation, with Gemini as fallback. This gives the daily index
-and text-only mention replies a provider hosted outside Google. ERNIE is a
-preview model; equivalent quality on Polish financial slang has not been
-established by the automated tests.
+`wykop-index` can use OpenRouter's `baidu/ernie-5.5-flash-preview:free` for
+sentiment analysis, with Gemini as fallback. All `wykop-post` mention replies
+use Gemini, including text-only threads. Tomek YouTube analysis also stays on
+Gemini and is optional: a video-analysis failure does not block the daily index.
+
+The OpenRouter model is configurable. ERNIE is the default preview model;
+equivalent quality on Polish financial slang has not been established by the
+automated tests.
 
 ## Configure and deploy after review
 
-In the Appwrite console, add the following environment variables to **each** of
-`wykop-index` and `wykop-post`. Store API keys as secret variables; do not commit
-them or paste them into a pull request.
+In the Appwrite console, configure the following environment variables for the
+indicated functions. Store API keys as secret variables; do not commit them or
+paste them into a pull request.
 
-| Variable | Value / behavior |
-| --- | --- |
-| `OPENROUTER_API_KEY` | An OpenRouter API key. Required to activate OpenRouter. |
-| `AI_PROVIDER` | Set to `openrouter` for explicit activation; `gemini` forces rollback. When unset, OpenRouter is selected if its key exists, otherwise Gemini is used. |
-| `OPENROUTER_MODEL` | Optional Appwrite/local selector when deploying outside GitHub. The GitHub deployment workflow packages its repository-variable selection instead, taking precedence over this environment value. Only `:free` models are accepted. |
-| `GEMINI_API_KEY` | Retain for inference fallback and Gemini media/URL processing. |
-| `GEMINI_BACKUP_API_KEY` | Optional second Gemini key for `wykop-post`. When absent, the primary key is reused. |
-| `GEMINI_MODEL` | Optional; defaults to `gemini-3.8-flash`. |
-| `GEMINI_FALLBACK_MODEL` | Optional; defaults to `gemini-3.6-flash`. |
+| Variable | Function | Value / behavior |
+| --- | --- | --- |
+| `OPENROUTER_API_KEY` | `wykop-index` | An OpenRouter API key. Required to activate OpenRouter for sentiment analysis. |
+| `AI_PROVIDER` | `wykop-index` | Set to `openrouter` for explicit activation; `gemini` forces rollback. When unset, OpenRouter is selected if its key exists, otherwise Gemini is used. |
+| `OPENROUTER_MODEL` | `wykop-index` | Optional Appwrite/local selector when deploying outside GitHub. The GitHub deployment workflow packages its repository-variable selection instead, taking precedence over this environment value. Only `:free` models are accepted. |
+| `GEMINI_API_KEY` | Both | Required for mention replies, Tomek video analysis, and the index's inference fallback. |
+| `GEMINI_BACKUP_API_KEY` | `wykop-post` | Optional second Gemini key. When absent, the primary key is reused. |
+| `GEMINI_MODEL` | Both | Optional; defaults to `gemini-3.8-flash`. |
+| `GEMINI_FALLBACK_MODEL` | Both | Optional; defaults to `gemini-3.6-flash`. |
 
-An explicitly configured OpenRouter provider with no key fails with a
-configuration error. An installation with neither new variable keeps using
-Gemini, so deploying the code before configuring the key does not disable it.
-Keep the existing Appwrite and Wykop credentials.
+For `wykop-index`, an explicitly configured OpenRouter provider with no key
+fails with a configuration error. Without OpenRouter configuration, sentiment
+analysis keeps using Gemini. `wykop-post` always uses Gemini, even if old
+`AI_PROVIDER` or `OPENROUTER_*` variables remain in its environment. Keep the
+existing Appwrite and Wykop credentials.
 
 After configuring the variables, deploy both function directories using the
 existing Appwrite deployment process. For verification, inspect provider logs and the next normal execution;
@@ -50,13 +54,13 @@ workflow to deploy both functions from the default branch.
 4. Run **Actions > Deploy Appwrite functions > Run workflow** on the default branch.
 
 The workflow tests the functions, validates `OPENROUTER_MODEL`, and packages that
-selection into each function before uploading and activating them with the
+selection into `wykop-index` before uploading and activating both functions with the
 pinned Appwrite CLI. Existing Appwrite variables, including API keys, are
 preserved: the CLI is not run with `--with-variables`. The workflow does not
 invoke either function. Their deployed settings come from `appwrite.config.json`;
 the existing Cloudflare scheduling configuration is unchanged.
 
-Editing the GitHub variable alone does **not** update running functions: rerun
+Editing the GitHub variable alone does **not** update running sentiment analysis: rerun
 the deployment workflow after each change. An empty/unset variable packages the
 default `baidu/ernie-5.5-flash-preview:free`. This selection takes precedence over
 any older Appwrite `OPENROUTER_MODEL` value. Outside this workflow, the committed
@@ -71,17 +75,17 @@ Reference: [Appwrite non-interactive CLI deployments](https://appwrite.io/docs/t
 - `wykop-index` uses the selected provider for the sentiment JSON. Its optional
   Tomek YouTube analysis remains on Gemini and can still be skipped on failure.
 - `wykop-post` keeps its existing Tavily/Brave searches, retrieved sources, and
-  Yahoo current-quote lookup. Text-only requests send that context to the selected
-  model; this does not enable paid Google Search grounding.
-- Mention batches containing photos, video embeds, or user-supplied HTTP URLs
-  use Gemini directly, preserving its attachment and URL-context processing.
-  These batches remain dependent on Gemini availability; attachments are not
-  silently dropped to force a text-only provider call.
-- OpenRouter returns a strict JSON-schema object. Reply arrays are wrapped as
-  `{"replies": [...]}` for that API and unwrapped before the existing posting
-  path. Both providers pass through local task validation. The current-price
-  guard applies to replies from either provider.
-- One OpenRouter request is attempted per generation, with a 45-second timeout
+  Yahoo current-quote lookup. All mention batches send that context to Gemini;
+  this does not enable paid Google Search grounding.
+- Photos, YouTube embeds, and user-supplied HTTP URLs retain Gemini attachment
+  and URL-context processing. Supported attachments elsewhere in the fetched
+  thread are still included when the mentioning comment itself has no media.
+  All mention replies remain dependent on Gemini availability.
+- OpenRouter sentiment responses use a strict JSON-schema object. Gemini
+  mention replies keep their existing flat JSON-array contract. Local response
+  validation finishes before posting, and all replies pass through the
+  current-price guard.
+- One OpenRouter request is attempted per sentiment generation, with a 45-second timeout
   and an 8,192-token output limit. HTTP failures (including quota/auth errors),
   refused or truncated completions, and invalid task JSON fall back to Gemini.
   No paid OpenRouter models or search plugins are enabled: requests also set
@@ -95,11 +99,11 @@ Reference: [Appwrite non-interactive CLI deployments](https://appwrite.io/docs/t
   does not repeat a Wykop POST. Existing Cloudflare schedules, the daily index's
   ten whole-run retries, and existing posting semantics are unchanged.
 
-Free OpenRouter accounts normally have a shared allowance of 50 free-model
-requests per day without purchasing credits. Both functions share the allowance
-if they use the same account. Idle `wykop-post` polls make no model request;
-generation attempts in later executions count again. Free endpoints can still
-run out of capacity. Tavily/Brave have their own quotas.
+Free OpenRouter endpoints have account-level daily and per-minute request
+limits and can still run out of capacity. Only index sentiment generation uses
+that allowance; mention replies do not call OpenRouter. Sentiment attempts in
+later executions count again. Idle `wykop-post` polls make no Gemini request.
+Tavily/Brave have their own quotas.
 
 References: [OpenRouter free limits](https://openrouter.ai/collections/free-models),
 [ERNIE model](https://openrouter.ai/baidu/ernie-5.5-flash-preview:free),
@@ -117,12 +121,9 @@ node --check functions/wykop-post/src/main.js
 ```
 
 The tests use mocked inference and do not publish Wykop replies or contact paid
-services. They cover both adapters, free request routing, provider failures,
-response contracts, media routing, and preservation of the current-price guard.
-They also check the packaged model selection in both isolated function uploads.
+services. They cover index provider routing and failures, packaged-model
+selection, response contracts, and preservation of the current-price guard.
+Mention-entrypoint tests verify Gemini routing with old OpenRouter configuration,
+attachments elsewhere in a thread, and Gemini's model/key retry sequence.
 They do not measure Polish model quality or live provider availability, and the
 deployment workflow has not been run against production.
-
-`ai-provider.js` is intentionally included in each function directory because
-Appwrite uploads those directories independently. The tests check both copies
-and ensure they remain identical.

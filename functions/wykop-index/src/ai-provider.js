@@ -14,15 +14,12 @@ export function resolveOpenRouterModel(env = process.env) {
   return model;
 }
 
-// This file is also packaged inside wykop-post: Appwrite uploads each function
-// directory independently. The contract tests check that both copies agree.
 export async function generateJson({
   prompt,
   systemInstruction,
   responseSchema,
   parseResponse,
   generateGemini,
-  requiresGemini = false,
   env = process.env,
   fetchImpl = fetch,
   log = () => {},
@@ -32,8 +29,8 @@ export async function generateJson({
   if (!['openrouter', 'gemini'].includes(provider)) {
     throw new Error('AI_PROVIDER must be openrouter or gemini.');
   }
-  if (provider === 'gemini' || requiresGemini) {
-    log(requiresGemini ? 'Using Gemini for media or linked-page analysis.' : 'Using Gemini for text generation.');
+  if (provider === 'gemini') {
+    log('Using Gemini for text generation.');
     return generateGemini();
   }
   if (!key) throw new Error('OPENROUTER_API_KEY is required when AI_PROVIDER=openrouter.');

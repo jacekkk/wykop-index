@@ -1,7 +1,6 @@
 import * as sdk from 'node-appwrite';
 import { GoogleGenAI } from '@google/genai';
-import { generateJson } from './ai-provider.js';
-import { REPLIES_RESPONSE_SCHEMA, parseRepliesResponse, requiresGeminiContext } from './ai-response.js';
+import { parseRepliesResponse } from './ai-response.js';
 import {
   applyCurrentQuoteGuard,
   buildSearchQuery,
@@ -32,7 +31,7 @@ export default async ({ req, res, log: baseLog, error }) => {
 
     const tablesDB = new sdk.TablesDB(client);
 
-    // Construct Gemini clients only when fallback or linked/media content needs them.
+    // All mention replies use Gemini, including text-only threads.
     const primaryAi = () => new GoogleGenAI({
       apiKey: process.env.GEMINI_API_KEY,
     });
@@ -136,7 +135,7 @@ export default async ({ req, res, log: baseLog, error }) => {
       }
     };
 
-    // Keep fallback requests within the function's 300-second execution timeout.
+    // Keep Gemini retries within the function's 300-second execution timeout.
     const retryWithBackoff = async (fn, maxAttempts = 4, delayMs = 5000) => {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
@@ -521,7 +520,8 @@ export default async ({ req, res, log: baseLog, error }) => {
       
       Wpisy: ${JSON.stringify(parsedNotifications)}`;
 
-      const generateGemini = () => retryWithBackoff(async (tools) => {
+      log('Using Gemini for all mention replies.');
+      mentionsResult = await retryWithBackoff(async (tools) => {
         log(`Tools enabled: ${JSON.stringify(tools.map(t => Object.keys(t)[0]))}`);
 
         const {
@@ -582,16 +582,6 @@ export default async ({ req, res, log: baseLog, error }) => {
         }
 
         return parseRepliesResponse(mentionsResponse.text);
-      });
-
-      mentionsResult = await generateJson({
-        prompt: `${mentionsPrompt}\nDla tego wywolania zwroc obiekt {"replies": [...]} zawierajacy powyzsza tablice.`,
-        systemInstruction,
-        responseSchema: REPLIES_RESPONSE_SCHEMA,
-        parseResponse: text => parseRepliesResponse(text, true),
-        generateGemini,
-        requiresGemini: requiresGeminiContext(parsedNotifications),
-        log,
       });
 
       mentionsResult = applyCurrentQuoteGuard(mentionsResult, parsedNotifications);
