@@ -4,7 +4,7 @@ Analiza sentymentu z tagu #gielda na wykop.pl: https://wykop-index.appwrite.netw
 
 ## O projekcie
 
-Aplikacja analizuje sentyment z tagu #gielda za pomocą AI (Gemini). Składa się z trzech komponentów:
+Aplikacja analizuje sentyment z tagu #gielda za pomocą AI (OpenRouter lub Gemini). Składa się z trzech komponentów:
 
 1. **wykop-index** - funkcja pobiera najnowsze wpisy z #gielda (z komentarzami), analizuje sentyment za pomocą AI, sprawdza sentyment Tomka (TomekIndicator®), generuje obrazek ze wskazówką, zapisuje w bazie danych i publikuje podsumowanie na Wykopie.
 2. **wykop-post** - funkcja co 5 minut sprawdza powiadomienia na Wykopie, odpowiada na @ za pomocą AI i zapisuje odpowiedzi w bazie danych.
@@ -28,6 +28,9 @@ appwrite login
 appwrite push functions # update functions
 appwrite push sites # update frontend
 ```
+
+Konfiguracja dostawców AI (ERNIE przez OpenRouter, zapasowy Gemini), obsługa
+wyszukiwania i multimediów oraz testy: [functions/AI_PROVIDERS.md](functions/AI_PROVIDERS.md).
 
 Harmonogram Cloudflare Workers (konfiguracja, testy i instrukcja wdrożenia):
 [cloudflare/wykop-scheduler](cloudflare/wykop-scheduler/README.md).

@@ -1,9 +1,10 @@
 import * as sdk from 'node-appwrite';
 import { GoogleGenAI } from '@google/genai';
+import { generateJson } from './ai-provider.js';
+import { REPLIES_RESPONSE_SCHEMA, parseRepliesResponse, requiresGeminiContext } from './ai-response.js';
 import {
   applyCurrentQuoteGuard,
   buildSearchQuery,
-  cleanJsonResponse,
   extractTickerFromSearchResults,
   formatEps,
   formatRevenue,
@@ -31,18 +32,18 @@ export default async ({ req, res, log: baseLog, error }) => {
 
     const tablesDB = new sdk.TablesDB(client);
 
-    // Initialize Gemini AI
-    const primaryAi = new GoogleGenAI({
+    // Construct Gemini clients only when fallback or linked/media content needs them.
+    const primaryAi = () => new GoogleGenAI({
       apiKey: process.env.GEMINI_API_KEY,
     });
     
-    const backupAi = new GoogleGenAI({
-      apiKey: process.env.GEMINI_BACKUP_API_KEY,
+    const backupAi = () => new GoogleGenAI({
+      apiKey: process.env.GEMINI_BACKUP_API_KEY || process.env.GEMINI_API_KEY,
     });
 
     let ai = primaryAi;
 
-    let model = 'gemini-3.7-flash';
+    let model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
     const systemInstruction = `You are KrachSmieciuchIndex, a helpful assistant that responds to questions about stock markets, investing, and economics on Wykop, a Polish social media platform.
     
     BEHAVIORAL RULES:
@@ -135,14 +136,16 @@ export default async ({ req, res, log: baseLog, error }) => {
       }
     };
 
-    // Retry helper with exponential backoff
-    const retryWithBackoff = async (fn, maxAttempts = 4, delayMs = 45000) => {
+    // Keep fallback requests within the function's 300-second execution timeout.
+    const retryWithBackoff = async (fn, maxAttempts = 4, delayMs = 5000) => {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          const fallbackModel = 'gemini-3.5-flash';
+          const fallbackModel = process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.6-flash';
 
           switch (attempt) {
             case 1:
+              ai = primaryAi;
+              model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
               log(`Attempt 1: Using primary AI instance and ${model} model`);
               break;
             case 2:
@@ -518,9 +521,7 @@ export default async ({ req, res, log: baseLog, error }) => {
       
       Wpisy: ${JSON.stringify(parsedNotifications)}`;
 
-      const mentionsSchema = { requiredFields: ['postId', 'username', 'url', 'post', 'reply'] };
-
-      await retryWithBackoff(async (tools) => {
+      const generateGemini = () => retryWithBackoff(async (tools) => {
         log(`Tools enabled: ${JSON.stringify(tools.map(t => Object.keys(t)[0]))}`);
 
         const {
@@ -559,12 +560,12 @@ export default async ({ req, res, log: baseLog, error }) => {
 
         mentionsContents.push({ text: mentionsPrompt });
 
-        const mentionsResponse = await ai.models.generateContent({
+        const mentionsResponse = await ai().models.generateContent({
           model: model,
           contents: mentionsContents,
           config: {
             httpOptions: {
-              timeout: 120000, // 120 seconds
+              timeout: 45_000,
             },
             systemInstruction: systemInstruction,
             tools: tools,
@@ -580,39 +581,17 @@ export default async ({ req, res, log: baseLog, error }) => {
           throw new Error("Mentions response text is empty or undefined");
         }
 
-        try {
-          mentionsResult = cleanJsonResponse(mentionsResponse.text);
-        } catch (parseError) {
-          error("Failed to parse mentions response as JSON: " + parseError.message);
-          error("Raw response: " + mentionsResponse.text);
-          throw new Error("Mentions returned invalid JSON: " + parseError.message);
-        }
+        return parseRepliesResponse(mentionsResponse.text);
+      });
 
-        // Validate schema
-        if (!Array.isArray(mentionsResult)) {
-          throw new Error("Mentions response should be an array");
-        }
-        
-        // Validate each object in the array
-        const errors = [];
-        const requiredFields = mentionsSchema.requiredFields || [];
-        mentionsResult.forEach((item, index) => {
-          if (typeof item !== 'object' || item === null) {
-            errors.push(`Item ${index} should be an object`);
-          } else {
-            requiredFields.forEach(field => {
-              if (!(field in item)) {
-                errors.push(`Item ${index} is missing required field: ${field}`);
-              }
-            });
-          }
-        });
-        
-        if (errors.length > 0) {
-          error("Mentions schema validation failed: " + errors.join(', '));
-          error("Raw response: " + mentionsResponse.text);
-          throw new Error("Mentions response doesn't match expected schema: " + errors.join(', '));
-        }
+      mentionsResult = await generateJson({
+        prompt: `${mentionsPrompt}\nDla tego wywolania zwroc obiekt {"replies": [...]} zawierajacy powyzsza tablice.`,
+        systemInstruction,
+        responseSchema: REPLIES_RESPONSE_SCHEMA,
+        parseResponse: text => parseRepliesResponse(text, true),
+        generateGemini,
+        requiresGemini: requiresGeminiContext(parsedNotifications),
+        log,
       });
 
       mentionsResult = applyCurrentQuoteGuard(mentionsResult, parsedNotifications);

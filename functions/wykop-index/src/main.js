@@ -2,9 +2,9 @@ import * as sdk from 'node-appwrite';
 import { InputFile } from 'node-appwrite/file';
 import { GoogleGenAI } from '@google/genai';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
+import { generateJson } from './ai-provider.js';
+import { SENTIMENT_RESPONSE_SCHEMA, parseSentimentResponse } from './ai-response.js';
 import {
-  cleanJsonResponse,
-  validateSchema,
   formatDateTime,
   parsePosts,
   getTopUser,
@@ -30,8 +30,8 @@ export default async ({ req, res, log: baseLog, error }) => {
     const tablesDB = new sdk.TablesDB(client);
     const storage = new sdk.Storage(client);
 
-    // Initialize Gemini AI
-    const ai = new GoogleGenAI({
+    // Initialize Gemini only for fallback or optional video analysis.
+    const getGemini = () => new GoogleGenAI({
       apiKey: process.env.GEMINI_API_KEY,
     });
 
@@ -45,14 +45,14 @@ export default async ({ req, res, log: baseLog, error }) => {
 
     CRITICAL: You MUST respond with ONLY raw JSON. DO NOT wrap your response in markdown code blocks. DO NOT add any text before or after the JSON. Your entire response must be valid JSON that can be directly parsed.`;
 
-    // Retry helper with exponential backoff
+    // Bounded Gemini fallback retries; Cloudflare manages whole-run retries.
     const maxAttempts = 3;
 
-    const retryWithBackoff = async (fn, delayMs = 30000) => {
+    const retryWithBackoff = async (fn, delayMs = 5000) => {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          const primaryModel = 'gemini-3.7-flash';
-          const backupModel = 'gemini-3.5-flash';
+          const primaryModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+          const backupModel = process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.6-flash';
 
           if (attempt === 1) {
             model = primaryModel;
@@ -272,44 +272,28 @@ export default async ({ req, res, log: baseLog, error }) => {
     
     Wpisy: ${JSON.stringify(parsedData)}`;
 
-    const sentimentSchema = {
-      sentiment: 'string',
-      summary: 'string',
-      mostDiscussed: { type: 'array-of-objects', requiredFields: ['asset', 'reasoning', 'url'] },
-      topQuotes: { type: 'array-of-objects', requiredFields: ['username', 'sentiment', 'quote', 'url'] }
-    };
-
-    let sentimentResult;
-    await retryWithBackoff(async () => {
-      const response = await ai.models.generateContent({
-        model: model,
-        contents: prompt,
-        config: {
-          httpOptions: {
-            timeout: 120000, // 120 seconds
-          },
-          systemInstruction: systemInstruction,
-          tools: [{ urlContext: {} }],
-        },
-      });
-
-      log("AI response: " + JSON.stringify(response.text));
-
-      try {
-        sentimentResult = cleanJsonResponse(response.text);
-      } catch (parseError) {
-        error("Failed to parse AI response as JSON: " + parseError.message);
-        error("Raw response: " + response.text);
-        throw new Error("AI returned invalid JSON: " + parseError.message);
-      }
-
-      // Validate schema
-      const schemaErrors = validateSchema(sentimentResult, sentimentSchema);
-      if (schemaErrors.length > 0) {
-        error("Schema validation failed: " + schemaErrors.join(', '));
-        error("Raw response: " + response.text);
-        throw new Error("AI response doesn't match expected schema: " + schemaErrors.join(', '));
-      }
+    let sentimentResult = await generateJson({
+      prompt,
+      systemInstruction,
+      responseSchema: SENTIMENT_RESPONSE_SCHEMA,
+      parseResponse: parseSentimentResponse,
+      log,
+      generateGemini: async () => {
+        let result;
+        await retryWithBackoff(async () => {
+          const response = await getGemini().models.generateContent({
+            model,
+            contents: prompt,
+            config: {
+              httpOptions: { timeout: 60_000 },
+              systemInstruction,
+              tools: [{ urlContext: {} }],
+            },
+          });
+          result = parseSentimentResponse(response.text);
+        });
+        return result;
+      },
     });
     
     if (Array.isArray(sentimentResult.topQuotes)) {
@@ -362,14 +346,14 @@ export default async ({ req, res, log: baseLog, error }) => {
 WAŻNE: Odpowiedz tylko samą analizą, bez żadnych dodatkowych komentarzy.`;
 
             await retryWithBackoff(async () => {
-              const videoResponse = await ai.models.generateContent({
+              const videoResponse = await getGemini().models.generateContent({
                 model: model,
                 contents: [
                   { fileData: { fileUri: videoUrl } },
                   { text: tomekVideoPrompt },
                 ],
                 config: {
-                  httpOptions: { timeout: 120000 },
+                  httpOptions: { timeout: 60_000 },
                   systemInstruction: 'You are a helpful assistant. Always respond in Polish.',
                 },
               });
