@@ -46,9 +46,12 @@ workflow to deploy both functions from the default branch.
    repository variable **`OPENROUTER_MODEL`**, for example
    `baidu/ernie-5.5-flash-preview:free`.
 2. Reuse the existing GitHub repository secret **`APPWRITE_API_KEY`**. The Appwrite
-   project key it contains must have `functions.read` and `functions.write` for
-   deployment; `execution.write` alone is insufficient. No additional deployment
-   secret is required. The OpenRouter key stays in Appwrite.
+   project key it contains must have `functions.read`, `functions.write`, and
+   `rules.read` for CLI deployment. If the CLI must create or update a function's
+   default domain rule, it also needs `rules.write`. Retain `execution.write` if
+   this key is also used by the execution workflows; that scope alone cannot
+   deploy code. No additional deployment secret is required. The OpenRouter key
+   stays in Appwrite.
 3. Retain the existing repository variables `APPWRITE_ENDPOINT`,
    `APPWRITE_PROJECT_ID`, `APPWRITE_WYKOP_INDEX_FUNCTION_ID`, and
    `APPWRITE_WYKOP_POST_FUNCTION_ID`, pointing to the deployed functions.
@@ -60,6 +63,19 @@ pinned Appwrite CLI. Existing Appwrite variables, including API keys, are
 preserved: the CLI is not run with `--with-variables`. The workflow does not
 invoke either function. Their deployed settings come from `appwrite.config.json`;
 the existing Cloudflare scheduling configuration is unchanged.
+
+The pinned CLI can print deployment errors while returning exit code zero. The
+workflow therefore reads each function's active deployment before and after the
+CLI push, requires a different active deployment ID, and verifies that deployment
+has status `ready`. A missing permission, failed upload/build/activation, or failed
+verification stops the job. An old ready deployment cannot produce a green run.
+The second function is attempted only after the first passes verification.
+
+If logs report `missing scopes (["rules.read"])`, the Appwrite key used by
+`APPWRITE_API_KEY` needs that scope; changing the GitHub secret's name does not
+change the key's permissions. Check the key in Appwrite and rerun deployment
+after correcting its scopes. A successful workflow verifies deployment, not
+successful Wykop posting.
 
 Editing the GitHub variable alone does **not** update running sentiment analysis: rerun
 the deployment workflow after each change. An empty/unset variable packages the
@@ -126,5 +142,6 @@ services. They cover index provider routing and failures, packaged-model
 selection, response contracts, and preservation of the current-price guard.
 Mention-entrypoint tests verify Gemini routing with old OpenRouter configuration,
 attachments elsewhere in a thread, and Gemini's model/key retry sequence.
-They do not measure Polish model quality or live provider availability, and the
-deployment workflow has not been run against production.
+Deployment regression tests cover zero-exit CLI failures, unchanged activation,
+non-ready builds, permission failures, and successful activation. The tests do
+not measure Polish model quality or live provider availability.
