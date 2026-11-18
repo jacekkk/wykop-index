@@ -44,14 +44,14 @@ jobs:
         run: npm install --global appwrite-cli@28.13.3
       - name: Configure Appwrite deployment credentials
         env:
-          APPWRITE_FUNCTIONS_API_KEY: ${{ secrets.APPWRITE_FUNCTIONS_API_KEY }}
+          APPWRITE_API_KEY: ${{ secrets.APPWRITE_API_KEY }}
         run: |
           : "${APPWRITE_ENDPOINT:?Set the APPWRITE_ENDPOINT repository variable}"
           : "${APPWRITE_PROJECT_ID:?Set the APPWRITE_PROJECT_ID repository variable}"
           : "${APPWRITE_WYKOP_INDEX_FUNCTION_ID:?Set the APPWRITE_WYKOP_INDEX_FUNCTION_ID repository variable}"
           : "${APPWRITE_WYKOP_POST_FUNCTION_ID:?Set the APPWRITE_WYKOP_POST_FUNCTION_ID repository variable}"
-          : "${APPWRITE_FUNCTIONS_API_KEY:?Set the APPWRITE_FUNCTIONS_API_KEY repository secret}"
-          appwrite client --endpoint "$APPWRITE_ENDPOINT" --project-id "$APPWRITE_PROJECT_ID" --key "$APPWRITE_FUNCTIONS_API_KEY"
+          : "${APPWRITE_API_KEY:?Set the APPWRITE_API_KEY repository secret}"
+          appwrite client --endpoint "$APPWRITE_ENDPOINT" --project-id "$APPWRITE_PROJECT_ID" --key "$APPWRITE_API_KEY"
       - name: Deploy and activate both functions
         run: |
           appwrite push functions --function-id "$APPWRITE_WYKOP_INDEX_FUNCTION_ID" --force --activate=true

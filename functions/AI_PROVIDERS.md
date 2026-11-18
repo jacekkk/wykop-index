@@ -45,9 +45,10 @@ workflow to deploy both functions from the default branch.
 1. In **Settings > Secrets and variables > Actions > Variables**, create the
    repository variable **`OPENROUTER_MODEL`**, for example
    `baidu/ernie-5.5-flash-preview:free`.
-2. On the **Secrets** tab of the same settings page, add **`APPWRITE_FUNCTIONS_API_KEY`**: an Appwrite
-   project API key with `functions.read` and `functions.write`. This is separate
-   from the execution-only scheduler key. The OpenRouter key stays in Appwrite.
+2. Reuse the existing GitHub repository secret **`APPWRITE_API_KEY`**. The Appwrite
+   project key it contains must have `functions.read` and `functions.write` for
+   deployment; `execution.write` alone is insufficient. No additional deployment
+   secret is required. The OpenRouter key stays in Appwrite.
 3. Retain the existing repository variables `APPWRITE_ENDPOINT`,
    `APPWRITE_PROJECT_ID`, `APPWRITE_WYKOP_INDEX_FUNCTION_ID`, and
    `APPWRITE_WYKOP_POST_FUNCTION_ID`, pointing to the deployed functions.
