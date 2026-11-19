@@ -29,7 +29,8 @@ appwrite push functions # update functions
 appwrite push sites # update frontend
 ```
 
-Konfiguracja dostawców AI (OpenRouter dla sentymentu, Gemini dla odpowiedzi i filmów), obsługa
+Konfiguracja dostawców AI (Gemini dla sentymentu z zapasowym OpenRouter,
+Gemini dla odpowiedzi i filmów), obsługa
 wyszukiwania i multimediów oraz testy: [functions/AI_PROVIDERS.md](functions/AI_PROVIDERS.md).
 
 Harmonogram Cloudflare Workers (konfiguracja, testy i instrukcja wdrożenia):
