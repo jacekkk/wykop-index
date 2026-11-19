@@ -24,21 +24,25 @@ export async function generateJson({
   fetchImpl = fetch,
   log = () => {},
 }) {
+  log('Using Gemini for sentiment analysis.');
+  let geminiError;
+  try {
+    // The caller runs and validates the complete Gemini retry sequence.
+    return await generateGemini();
+  } catch (err) {
+    geminiError = err;
+  }
+
   const key = env.OPENROUTER_API_KEY?.trim();
-  const provider = env.AI_PROVIDER || (key ? 'openrouter' : 'gemini');
-  if (!['openrouter', 'gemini'].includes(provider)) {
-    throw new Error('AI_PROVIDER must be openrouter or gemini.');
+  if (!key) {
+    log('Gemini failed and no OpenRouter fallback key is configured.');
+    throw geminiError;
   }
-  if (provider === 'gemini') {
-    log('Using Gemini for text generation.');
-    return generateGemini();
-  }
-  if (!key) throw new Error('OPENROUTER_API_KEY is required when AI_PROVIDER=openrouter.');
 
   const model = resolveOpenRouterModel(env);
 
   try {
-    log(`Using OpenRouter model ${model}.`);
+    log(`Gemini failed; using OpenRouter fallback model ${model}.`);
     const response = await fetchImpl(OPENROUTER_URL, {
       method: 'POST',
       redirect: 'manual',
@@ -79,9 +83,9 @@ export async function generateJson({
     return parseResponse(choice.message.content);
   } catch (err) {
     // Do not log upstream bodies, prompts, credentials, or arbitrary exception
-    // messages. A failed inference is safe to fall back; no Wykop post ran here.
+    // messages. Do not loop back to Gemini or repeat either provider here.
     const reason = err instanceof ProviderError ? err.message : 'request or output validation failed';
-    log(`OpenRouter failed (${reason}); falling back to Gemini.`);
-    return generateGemini();
+    log(`OpenRouter fallback failed (${reason}).`);
+    throw new AggregateError([geminiError, err], `Gemini and OpenRouter sentiment generation failed (${reason}).`);
   }
 }
