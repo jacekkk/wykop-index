@@ -1,19 +1,31 @@
-# Cloudflare cron scheduler
+# Cloudflare cron schedulers
 
-This Worker submits asynchronous Appwrite executions for the existing functions:
+Two independently deployed Workers submit asynchronous Appwrite executions:
 
-| Function | Cron (UTC) | Time |
-| --- | --- | --- |
-| `wykop-index` | `10 19 * * MON-FRI` | Weekdays at 19:10 UTC |
-| `wykop-post` | `*/5 * * * *` | Every five minutes |
+| Worker | Function | Configuration | Cron (UTC) |
+| --- | --- | --- | --- |
+| `wykop-scheduler` | `wykop-index` | `wrangler.jsonc` | `10 19 * * MON-FRI` — weekdays at 19:10 UTC |
+| `wykop-post-scheduler` | `wykop-post` | `wrangler.post.jsonc` | `*/5 * * * *` — every five minutes |
+
+The index Worker keeps the existing `wykop-scheduler` name, entrypoint, Durable
+Object binding, class, and migration. Deploying this configuration to the same
+Cloudflare account preserves its retry namespace and stored runs. Do not rename
+or delete that Worker during the split. The post Worker has no Durable Objects.
+Each entrypoint rejects the other function's cron, including a stale five-minute
+event delivered to the index Worker during cron propagation.
+
+The Workers have separate enable flags, secrets, deployments, and logs. Their
+Appwrite request client and tests share this npm package. In this checkout the
+existing index Worker remains enabled; the new post Worker starts **disabled**
+until its secret is configured and the old post schedule is removed.
 
 These preserve the intended former GitHub workflow schedules. Cloudflare numbers
 Sunday as 1 and Saturday as 7, so its numeric `1-5` range means Sunday–Thursday.
 Use explicit `MON-FRI` to include Friday and exclude Sunday. See
 [Cloudflare's cron syntax](https://developers.cloudflare.com/workers/configuration/cron-triggers/#supported-cron-expressions).
 
-The GitHub `schedule`
-triggers have been removed; both workflows retain `workflow_dispatch` for manual use.
+The GitHub `schedule` triggers have already been removed; both workflows retain
+`workflow_dispatch` for manual use.
 Cloudflare Cron Triggers use UTC; daylight saving time does not shift these times.
 At 19:10 on weekdays both functions are submitted independently, without ordering.
 
@@ -23,58 +35,63 @@ delay after each confirmed failure** (eleven executions maximum including the fi
 
 ## Configuration
 
-`wrangler.jsonc` contains the endpoint, project, and function IDs from the root
-`appwrite.config.json`. Update them if you use a different Appwrite project.
+Each Wrangler configuration contains the endpoint, project, and its own function
+ID from the root `appwrite.config.json`. Update them if you use a different project.
 `APPWRITE_ENDPOINT` must be an HTTPS API base URL including `/v1`, without URL
 credentials, a query, or a fragment. Redirects are rejected to protect the API key.
 
-`SCHEDULER_ENABLED` is `"true"` for the configured production Worker. For a new
-installation, set it to `"false"` before the first deployment so you can configure
-the secret before submissions start. Only the exact string `"true"` enables
-submissions. Disabled invocations log `scheduler_disabled` and do not require an
-Appwrite key.
+`SCHEDULER_ENABLED` applies only to the Worker whose configuration you deploy.
+Only the exact string `"true"` enables submissions. Disabled invocations log
+`scheduler_disabled` and do not require an Appwrite key. For a new installation,
+set both configurations to `"false"` before deploying and adding secrets.
 
-Store `APPWRITE_API_KEY` as a Cloudflare Worker secret. Use an Appwrite project
-API key with both `execution.write` and `execution.read` scopes and an appropriate
-expiry date. Read access is required to monitor index completion before deciding
-whether to retry. The key is for execution management, not the function's own
-runtime API key. Do not put it
-in `wrangler.jsonc`, commit it, or pass it on a command line. A local `.dev.vars`
-file is ignored by Git, if needed for development.
+Store `APPWRITE_API_KEY` as a secret **on each Worker**. The existing index secret
+is retained when redeploying the same Worker; it is not copied to a new Worker.
+Enter the same Appwrite project key at the new Worker's secure prompt, or use a
+separate key. Index needs `execution.write` and `execution.read` to monitor
+completion before retrying; post only needs `execution.write`. Set an appropriate
+expiry date. These keys manage executions, rather than supplying the functions'
+own runtime keys. Do not commit a key, put it in a Wrangler configuration, or pass
+it on a command line. A local `.dev.vars` file is ignored by Git.
 
-## Test and deploy
+## Test and bundle
 
 Requirements: Node.js 22 or newer, npm, and a Cloudflare account with Workers
 permissions. Wrangler 4 is included as a development dependency and locked in
 `package-lock.json`. Index retries use one SQLite-backed Durable Object per UTC
-date. The binding and initial class migration are included in `wrangler.jsonc`;
-Wrangler creates the namespace during deployment. SQLite-backed Durable Objects
-are available on Workers Free.
-
-For a new installation, first set `SCHEDULER_ENABLED` to `"false"` as described
-above. Keep an existing production installation enabled when redeploying it.
+date. The existing binding and class migration remain in `wrangler.jsonc`.
+SQLite-backed Durable Objects are available on Workers Free.
 
 ```sh
 cd cloudflare/wykop-scheduler
 npm ci
 npm test
 npm run check
-npx wrangler login
-npm run deploy
-npx wrangler secret put APPWRITE_API_KEY
 ```
 
-The last command securely prompts for the key. At this point cron events are
-configured, but submissions remain disabled. No Appwrite function runs as part
-of tests, bundle validation, or deployment with submissions disabled.
-`workers_dev` and preview URLs are disabled, and HTTP requests return 404; there
-is no HTTP endpoint for manually running production functions.
+`npm run check` bundles **both** Workers without deploying them. GitHub's
+**Test Cloudflare schedulers** workflow runs these checks and tests for changes
+here. It does not deploy. The Appwrite deployment workflow also does not deploy
+Cloudflare Workers; merging this PR alone does not change the live schedules.
 
-For local event routing without creating executions, set `SCHEDULER_ENABLED` to
-`"false"`, run `npm run dev`, then in another terminal:
+| Action | Index | Post |
+| --- | --- | --- |
+| Local development | `npm run dev:index` (port 8787) | `npm run dev:post` (port 8788) |
+| Bundle only | `npm run check:index` | `npm run check:post` |
+| Deploy | `npm run deploy:index` | `npm run deploy:post` |
+| Set secret | `npx wrangler secret put APPWRITE_API_KEY --config wrangler.jsonc` | `npx wrangler secret put APPWRITE_API_KEY --config wrangler.post.jsonc` |
+| Live logs | `npx wrangler tail --config wrangler.jsonc` | `npx wrangler tail --config wrangler.post.jsonc` |
+
+For compatibility, `npm run deploy` and `npm run dev` target index only. There is
+no command that deploys both Workers together. Both have `workers_dev` and preview
+URLs disabled, and HTTP requests return 404.
+
+For local event routing without creating executions, put
+`SCHEDULER_ENABLED="false"` in `.dev.vars`, start each local Worker, then:
 
 ```sh
-curl --get 'http://localhost:8787/__scheduled' --data-urlencode 'cron=*/5 * * * *'
+curl --get 'http://localhost:8787/__scheduled' --data-urlencode 'cron=10 19 * * MON-FRI'
+curl --get 'http://localhost:8788/__scheduled' --data-urlencode 'cron=*/5 * * * *'
 ```
 
 Check for `scheduler_disabled` in the local Wrangler output. This verifies local
@@ -82,40 +99,55 @@ Cron routing only, not Appwrite access. The automated tests use fake credentials
 and mocked HTTP responses. The tests cover the retry limit and exact delays with
 a controllable clock, success, uncertain submissions, read failures, and recovery
 after a crash. Runtime tests exercise real alarms and RPC, preserve SQLite state
-across a complete runtime restart, and reject redirects without forwarding keys.
+across a complete runtime restart, reject redirects without forwarding keys,
+and exercise the two entrypoints separately without the other function's binding.
 
-## Activate Cloudflare scheduling
+## Split the existing production Worker
 
-1. Deploy with `SCHEDULER_ENABLED: "false"` and set the secret as above. Confirm
-   the endpoint and function IDs against your deployed Appwrite functions.
-2. Merge this change into the repository's default branch to remove the GitHub
-   `schedule` triggers from **Run wykop-index** and **Run wykop-post**. Manual
-   `workflow_dispatch` runs remain available. Wait for any running or queued
-   GitHub runs and their Appwrite executions to finish. Also check that neither
-   Appwrite function has its own active schedule. Avoid manual executions during
-   this transition.
-3. Change `SCHEDULER_ENABLED` to `"true"` in `wrangler.jsonc` and run
-   `npm run deploy`. Cloudflare cron changes can take up to 15 minutes to propagate.
-4. Ensure the Appwrite key has both `execution.read` and `execution.write`.
-   Run `npx wrangler tail` and watch for `appwrite_execution_submitted`. Inspect
-   each logged execution ID in the Appwrite console and confirm it finishes
-   successfully (status `completed`, HTTP 2xx). Verify `wykop-post` on a five-minute
-   interval and `wykop-index` at its next weekday 19:10 UTC slot. A submission log
-   alone is not proof of a successful function run. The index coordinator logs
-   `index_execution_succeeded` once it confirms successful completion, or
-   `index_retry_scheduled` after a confirmed failure.
-5. Commit the enabled Worker configuration so future deployments keep it active.
+After review and merge, use this order in the same Cloudflare account as the
+current `wykop-scheduler` Worker:
 
-GitHub scheduling is deliberately removed in this change because of its reported
-unreliability. Until the Worker is deployed, configured, and enabled, automatic
-executions will be paused. Keeping two active schedulers can generate duplicate
-Wykop replies. Manually dispatching a retained workflow can also overlap a
-Cloudflare execution: check Appwrite first.
+1. Run `npx wrangler login`. Keep `SCHEDULER_ENABLED: "false"` in
+   `wrangler.post.jsonc`. Run `npm run deploy:post`, then
+   `npx wrangler secret put APPWRITE_API_KEY --config wrangler.post.jsonc`.
+   The new post Worker remains disabled while the existing Worker keeps running.
+2. Run `npm run deploy:index`. This keeps the original Worker, secret, and retry
+   namespace, fixes the weekday cron to `MON-FRI`, and removes its post cron and
+   post event handler. Existing index retries retain their state and alarms.
+3. Allow up to 15 minutes for cron changes to propagate. Confirm in Cloudflare
+   that `wykop-scheduler` has only the weekday index trigger, and wait for any
+   post executions submitted by the old Worker to finish in Appwrite.
+4. Change `SCHEDULER_ENABLED` to `"true"` in `wrangler.post.jsonc` and run
+   `npm run deploy:post`. Commit the enabled configuration so later deployments
+   retain it. There is a short post scheduling pause between steps 2 and 4;
+   keeping the new Worker disabled until then avoids two active post schedulers.
+5. Watch each Worker's logs separately. Verify a post execution at the next
+   five-minute slot and index at its next weekday 19:10 UTC slot. The log
+   `appwrite_execution_submitted` means Appwrite accepted an execution, not that
+   the function finished: check status `completed` with HTTP 2xx in Appwrite.
+   Index additionally logs `index_execution_succeeded` or `index_retry_scheduled`.
 
-To roll back, deploy `SCHEDULER_ENABLED: "false"`, verify Cloudflare logs show
-disabled events, and let outstanding Appwrite executions finish. Then restore
-the GitHub schedules if desired. Changing the flag
-does not cancel executions already submitted.
+Cron changes do not backfill a missed slot. Manual GitHub/Appwrite runs are
+independent of the coordinator, so check for running executions first. GitHub
+schedules should remain disabled, and neither Appwrite function should have a
+second active schedule.
+
+## New installation and pausing
+
+For a fresh account, set `SCHEDULER_ENABLED: "false"` in **both** configurations,
+deploy each Worker, and set `APPWRITE_API_KEY` separately using the commands above.
+Confirm the Appwrite endpoint, function IDs, and key scopes. Disable any other
+schedulers and let their in-flight executions finish before enabling the two
+Workers. Change each flag to `"true"`, deploy that Worker, and commit the enabled
+configuration. Tests, dry runs, and deployments with submissions disabled do not
+invoke the functions.
+
+To pause either function, set its flag to `"false"` and deploy only that Worker.
+Verify `scheduler_disabled` in its logs. Pausing index also pauses pending index
+attempts; post is unaffected. Existing Appwrite executions continue. Before
+restoring another scheduler, wait for outstanding executions to finish. To undo
+the split, disable the new post Worker first and drain its executions before
+restoring post routing and its five-minute trigger on the original Worker.
 
 ## Index retry policy
 
@@ -181,7 +213,7 @@ does not cancel executions already submitted.
 
 | Symptom | Check |
 | --- | --- |
-| Only `scheduler_disabled` logs | Set `SCHEDULER_ENABLED` to `"true"` and redeploy after pausing GitHub. |
+| Only `scheduler_disabled` logs | Set `SCHEDULER_ENABLED` to `"true"` in that Worker's configuration and deploy it after completing the transition. |
 | No cron logs | Worker account/name, deployed cron settings, propagation delay, and Cloudflare dashboard event history. `wrangler tail` shows live events only. |
 | Missing configuration error | Worker variables and the `APPWRITE_API_KEY` secret on the correct account/Worker. |
 | HTTP 401/403 | API key project, expiry, and both `execution.write` and `execution.read` scopes. |

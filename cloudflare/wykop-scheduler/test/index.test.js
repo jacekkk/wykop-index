@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import worker, { dispatchScheduled } from '../src/worker.js';
+import indexWorker, { dispatchScheduled } from '../src/worker.js';
+import postWorker, { dispatchPostScheduled } from '../src/post.js';
 import { INDEX_CRON, POST_CRON, runScheduled } from '../src/scheduler.js';
 
 const env = {
@@ -30,7 +31,7 @@ function harness(fetchImpl = async () => Response.json({ $id: 'execution-id', st
   };
 }
 
-test('both crons submit the correct asynchronous Appwrite execution', async () => {
+test('the shared Appwrite client submits the correct asynchronous execution for each function', async () => {
   for (const [cron, functionName, variable] of [
     [INDEX_CRON, 'wykop-index', 'APPWRITE_WYKOP_INDEX_FUNCTION_ID'],
     [POST_CRON, 'wykop-post', 'APPWRITE_WYKOP_POST_FUNCTION_ID'],
@@ -125,42 +126,92 @@ test('malformed success responses never cause a second submission', async () => 
   }
 });
 
-test('the Worker tracks scheduled work and errors, disables platform retries, and rejects HTTP triggers', async (t) => {
+test('the post Worker tracks scheduled work and errors, disables platform retries, and rejects HTTP triggers', async (t) => {
   const requests = t.mock.method(globalThis, 'fetch', async () => Response.json({ $id: 'worker-execution' }, { status: 202 }));
   t.mock.method(console, 'info', () => {});
   const pending = [];
   let noRetryCalls = 0;
   const event = { ...controller(), noRetry: () => { noRetryCalls++; } };
   const ctx = { waitUntil: (promise) => pending.push(promise) };
-  worker.scheduled(event, env, ctx);
+  postWorker.scheduled(event, env, ctx);
   assert.equal(noRetryCalls, 1);
   assert.equal(pending.length, 1);
   assert.deepEqual(await pending[0], { functionName: 'wykop-post', executionId: 'worker-execution' });
   assert.equal(requests.mock.callCount(), 1);
 
-  worker.scheduled(event, { ...env, APPWRITE_API_KEY: '' }, ctx);
+  postWorker.scheduled(event, { ...env, APPWRITE_API_KEY: '' }, ctx);
   await assert.rejects(pending[1], /APPWRITE_API_KEY/);
   assert.equal(noRetryCalls, 2);
   assert.equal(requests.mock.callCount(), 1);
 
-  const response = await worker.fetch(new Request('https://worker.example.test/?cron=*/5'), env, ctx);
+  const response = await postWorker.fetch(new Request('https://worker.example.test/?cron=*/5'), env, ctx);
   assert.equal(response.status, 404);
   assert.equal(requests.mock.callCount(), 1);
 });
 
-test('deployment configuration matches Appwrite and GitHub workflows allow only manual runs', async () => {
+test('Workers reject each other\'s cron before accessing Appwrite or retry state', async (t) => {
+  const requests = t.mock.method(globalThis, 'fetch', async () => { throw new Error('Unexpected Appwrite request'); });
+  let stateAccesses = 0;
+  const config = { ...env, INDEX_RETRIES: { getByName() { stateAccesses++; throw new Error('Unexpected retry state access'); } } };
+  for (const [worker, cron] of [[indexWorker, POST_CRON], [postWorker, INDEX_CRON]]) {
+    const pending = [];
+    let noRetryCalls = 0;
+    worker.scheduled({ ...controller(cron), noRetry() { noRetryCalls++; } }, config, { waitUntil: (promise) => pending.push(promise) });
+    assert.equal(noRetryCalls, 1);
+    assert.equal(pending.length, 1);
+    await assert.rejects(pending[0], /Unsupported scheduled cron/);
+    assert.equal((await worker.fetch()).status, 404);
+  }
+  assert.equal(requests.mock.callCount(), 0);
+  assert.equal(stateAccesses, 0);
+});
+
+test('Workers pause independently without requiring secrets or affecting the other function', async (t) => {
+  const requests = t.mock.method(globalThis, 'fetch', async () => Response.json({ $id: 'post-execution' }, { status: 202 }));
+  const logs = t.mock.method(console, 'info', () => {});
+  await dispatchScheduled(controller(INDEX_CRON), { SCHEDULER_ENABLED: 'false' });
+  await dispatchPostScheduled(controller(POST_CRON), env);
+  assert.equal(requests.mock.callCount(), 1);
+
+  await dispatchPostScheduled(controller(POST_CRON), { SCHEDULER_ENABLED: 'false' });
+  let indexStarts = 0;
+  await dispatchScheduled(controller(INDEX_CRON), {
+    ...env,
+    INDEX_RETRIES: { getByName: () => ({ start: async () => { indexStarts++; return { phase: 'ready', attempt: 0 }; } }) },
+  });
+  assert.equal(indexStarts, 1);
+  assert.equal(requests.mock.callCount(), 1);
+  assert.equal(logs.mock.calls.filter(({ arguments: [message] }) => JSON.parse(message).event === 'scheduler_disabled').length, 2);
+  for (const flag of [undefined, '', 'TRUE', true]) {
+    await assert.rejects(dispatchScheduled(controller(INDEX_CRON), { SCHEDULER_ENABLED: flag }), /SCHEDULER_ENABLED/);
+  }
+});
+
+test('independent Worker configurations match Appwrite and preserve the index namespace', async () => {
   const config = JSON.parse(await readFile(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
+  const postConfig = JSON.parse(await readFile(new URL('../wrangler.post.jsonc', import.meta.url), 'utf8'));
   const appwrite = JSON.parse(await readFile(new URL('../../../appwrite.config.json', import.meta.url), 'utf8'));
-  assert.deepEqual(config.triggers.crons, [INDEX_CRON, POST_CRON]);
-  assert.equal(config.vars.APPWRITE_ENDPOINT, appwrite.endpoint);
-  assert.equal(config.vars.APPWRITE_PROJECT_ID, appwrite.projectId);
+  assert.equal(config.name, 'wykop-scheduler', 'keep the deployed index Worker identity and Durable Object namespace');
+  assert.equal(postConfig.name, 'wykop-post-scheduler');
+  assert.equal(config.main, 'src/index.js');
+  assert.equal(postConfig.main, 'src/post.js');
+  assert.deepEqual(config.triggers.crons, [INDEX_CRON]);
+  assert.deepEqual(postConfig.triggers.crons, [POST_CRON]);
+  for (const workerConfig of [config, postConfig]) {
+    assert.equal(workerConfig.vars.APPWRITE_ENDPOINT, appwrite.endpoint);
+    assert.equal(workerConfig.vars.APPWRITE_PROJECT_ID, appwrite.projectId);
+    assert.ok(['true', 'false'].includes(workerConfig.vars.SCHEDULER_ENABLED));
+    assert.equal(workerConfig.workers_dev, false);
+    assert.equal(workerConfig.preview_urls, false);
+  }
   assert.equal(config.vars.APPWRITE_WYKOP_INDEX_FUNCTION_ID, appwrite.functions.find((fn) => fn.name === 'wykop-index').$id);
-  assert.equal(config.vars.APPWRITE_WYKOP_POST_FUNCTION_ID, appwrite.functions.find((fn) => fn.name === 'wykop-post').$id);
-  assert.ok(['true', 'false'].includes(config.vars.SCHEDULER_ENABLED));
-  assert.equal(config.workers_dev, false);
-  assert.equal(config.preview_urls, false);
+  assert.equal(postConfig.vars.APPWRITE_WYKOP_POST_FUNCTION_ID, appwrite.functions.find((fn) => fn.name === 'wykop-post').$id);
+  assert.equal(config.vars.APPWRITE_WYKOP_POST_FUNCTION_ID, undefined);
+  assert.equal(postConfig.vars.APPWRITE_WYKOP_INDEX_FUNCTION_ID, undefined);
   assert.deepEqual(config.durable_objects.bindings, [{ name: 'INDEX_RETRIES', class_name: 'IndexRetryCoordinator' }]);
   assert.deepEqual(config.migrations, [{ tag: 'v1', new_sqlite_classes: ['IndexRetryCoordinator'] }]);
+  assert.equal(postConfig.durable_objects, undefined);
+  assert.equal(postConfig.migrations, undefined);
   for (const name of ['wykop-index', 'wykop-post']) {
     const workflow = await readFile(new URL(`../../../.github/workflows/run-${name}.yml`, import.meta.url), 'utf8');
     assert.match(workflow, /^  workflow_dispatch:/m);

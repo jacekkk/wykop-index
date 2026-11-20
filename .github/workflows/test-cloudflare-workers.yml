@@ -1,0 +1,35 @@
+name: Test Cloudflare schedulers
+
+on:
+  pull_request:
+    paths:
+      - cloudflare/wykop-scheduler/**
+      - .github/workflows/test-cloudflare-workers.yml
+  push:
+    branches: [main]
+    paths:
+      - cloudflare/wykop-scheduler/**
+      - .github/workflows/test-cloudflare-workers.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloudflare/wykop-scheduler
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: cloudflare/wykop-scheduler/package-lock.json
+      - run: npm ci
+      - name: Test scheduling, isolation, and persisted retries
+        run: npm test
+      - name: Bundle both Workers without deployment
+        run: npm run check

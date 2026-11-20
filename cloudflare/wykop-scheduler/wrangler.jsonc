@@ -9,7 +9,7 @@
     "enabled": true
   },
   "triggers": {
-    "crons": ["10 19 * * MON-FRI", "*/5 * * * *"]
+    "crons": ["10 19 * * MON-FRI"]
   },
   "durable_objects": {
     "bindings": [{ "name": "INDEX_RETRIES", "class_name": "IndexRetryCoordinator" }]
@@ -19,7 +19,6 @@
     "SCHEDULER_ENABLED": "true",
     "APPWRITE_ENDPOINT": "https://fra.cloud.appwrite.io/v1",
     "APPWRITE_PROJECT_ID": "wykopindex",
-    "APPWRITE_WYKOP_INDEX_FUNCTION_ID": "696171ec001de97fe3c0",
-    "APPWRITE_WYKOP_POST_FUNCTION_ID": "wykop-post"
+    "APPWRITE_WYKOP_INDEX_FUNCTION_ID": "696171ec001de97fe3c0"
   }
 }

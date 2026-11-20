@@ -37,10 +37,11 @@ Konfiguracja dostawców AI (Gemini dla sentymentu z zapasowym OpenRouter,
 Gemini dla odpowiedzi i filmów), obsługa
 wyszukiwania i multimediów oraz testy: [functions/AI_PROVIDERS.md](functions/AI_PROVIDERS.md).
 
-Harmonogram Cloudflare Workers (konfiguracja, testy i instrukcja wdrożenia):
+Osobne harmonogramy Cloudflare Workers dla indeksu i odpowiedzi (konfiguracja, testy i wdrożenie):
 [cloudflare/wykop-scheduler](cloudflare/wykop-scheduler/README.md).
 Harmonogramy GitHub Actions są wyłączone; uruchomienia ręczne pozostają dostępne.
-Worker jest włączony w skonfigurowanym środowisku produkcyjnym. Konfigurując nowe
-konto, najpierw wyłącz wysyłanie wykonań i ustaw sekret Appwrite zgodnie z instrukcją.
+Worker indeksu zachowuje nazwę `wykop-scheduler` i stan ponowień. Nowy
+`wykop-post-scheduler` jest początkowo wyłączony; instrukcja opisuje przeniesienie
+harmonogramu odpowiedzi i ustawienie jego sekretu. Każdy Worker wdraża się osobno.
 
 Projekt edukacyjno-rozrywkowy. Nie inwestuj na podstawie sentymentu z wykop.pl ani TomekIndicator®.

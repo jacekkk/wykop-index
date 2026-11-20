@@ -38,17 +38,21 @@ export function executionRequest(env, variable) {
   };
 }
 
-export async function runScheduled(controller, env, { fetchImpl = fetch, logger = console } = {}) {
-  const job = jobs.get(controller.cron);
-  if (!job) throw new Error('Unsupported scheduled cron. Check the Worker configuration.');
-
+export function schedulerEnabled(controller, env, logger = console) {
   if (env.SCHEDULER_ENABLED === 'false') {
     logger.info(JSON.stringify({ event: 'scheduler_disabled', cron: controller.cron }));
-    return;
+    return false;
   }
   if (env.SCHEDULER_ENABLED !== 'true') {
     throw new Error('SCHEDULER_ENABLED must be "true" or "false".');
   }
+  return true;
+}
+
+export async function runScheduled(controller, env, { fetchImpl = fetch, logger = console } = {}) {
+  const job = jobs.get(controller.cron);
+  if (!job) throw new Error('Unsupported scheduled cron. Check the Worker configuration.');
+  if (!schedulerEnabled(controller, env, logger)) return;
 
   const { url, headers } = executionRequest(env, job.variable);
 
