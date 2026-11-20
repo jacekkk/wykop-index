@@ -1,6 +1,12 @@
 name: Deploy Appwrite functions
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - functions/**
+      - appwrite.config.json
+      - .github/workflows/deploy-functions.yml
   workflow_dispatch:
 
 permissions:
@@ -29,6 +35,10 @@ jobs:
           node-version: '22'
       - name: Test functions before deployment
         run: node --test functions/test/*.test.mjs
+      - name: Check function entrypoints
+        run: |
+          node --check functions/wykop-index/src/main.js
+          node --check functions/wykop-post/src/main.js
       - name: Package the configured OpenRouter fallback model
         env:
           OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
@@ -52,7 +62,10 @@ jobs:
           : "${APPWRITE_WYKOP_POST_FUNCTION_ID:?Set the APPWRITE_WYKOP_POST_FUNCTION_ID repository variable}"
           : "${APPWRITE_API_KEY:?Set the APPWRITE_API_KEY repository secret}"
           appwrite client --endpoint "$APPWRITE_ENDPOINT" --project-id "$APPWRITE_PROJECT_ID" --key "$APPWRITE_API_KEY"
-      - name: Deploy and activate both functions
+      - name: Deploy and verify active functions
+        env:
+          APPWRITE_API_KEY: ${{ secrets.APPWRITE_API_KEY }}
         run: |
-          appwrite push functions --function-id "$APPWRITE_WYKOP_INDEX_FUNCTION_ID" --force --activate=true
-          appwrite push functions --function-id "$APPWRITE_WYKOP_POST_FUNCTION_ID" --force --activate=true
+          set -euo pipefail
+          node functions/scripts/deploy-function.mjs "$APPWRITE_WYKOP_INDEX_FUNCTION_ID"
+          node functions/scripts/deploy-function.mjs "$APPWRITE_WYKOP_POST_FUNCTION_ID"
