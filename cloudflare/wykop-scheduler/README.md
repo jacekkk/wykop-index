@@ -4,10 +4,15 @@ This Worker submits asynchronous Appwrite executions for the existing functions:
 
 | Function | Cron (UTC) | Time |
 | --- | --- | --- |
-| `wykop-index` | `10 19 * * 1-5` | Weekdays at 19:10 UTC |
+| `wykop-index` | `10 19 * * MON-FRI` | Weekdays at 19:10 UTC |
 | `wykop-post` | `*/5 * * * *` | Every five minutes |
 
-These preserve the former GitHub workflow schedules. The GitHub `schedule`
+These preserve the intended former GitHub workflow schedules. Cloudflare numbers
+Sunday as 1 and Saturday as 7, so its numeric `1-5` range means Sunday–Thursday.
+Use explicit `MON-FRI` to include Friday and exclude Sunday. See
+[Cloudflare's cron syntax](https://developers.cloudflare.com/workers/configuration/cron-triggers/#supported-cron-expressions).
+
+The GitHub `schedule`
 triggers have been removed; both workflows retain `workflow_dispatch` for manual use.
 Cloudflare Cron Triggers use UTC; daylight saving time does not shift these times.
 At 19:10 on weekdays both functions are submitted independently, without ordering.

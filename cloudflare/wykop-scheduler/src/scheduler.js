@@ -1,4 +1,5 @@
-export const INDEX_CRON = '10 19 * * 1-5';
+// Cloudflare numbers Sunday as 1; names avoid GitHub/Unix weekday ambiguity.
+export const INDEX_CRON = '10 19 * * MON-FRI';
 export const POST_CRON = '*/5 * * * *';
 
 const jobs = new Map([

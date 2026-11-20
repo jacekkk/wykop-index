@@ -9,7 +9,7 @@
     "enabled": true
   },
   "triggers": {
-    "crons": ["10 19 * * 1-5", "*/5 * * * *"]
+    "crons": ["10 19 * * MON-FRI", "*/5 * * * *"]
   },
   "durable_objects": {
     "bindings": [{ "name": "INDEX_RETRIES", "class_name": "IndexRetryCoordinator" }]

@@ -168,7 +168,7 @@ test('deployment configuration matches Appwrite and GitHub workflows allow only 
   }
 });
 
-test('index cron selects one durable run per UTC date', async (t) => {
+test('a Friday weekday cron selects one durable index run for that UTC date', async (t) => {
   const calls = [];
   t.mock.method(console, 'info', () => {});
   const config = {
@@ -179,9 +179,10 @@ test('index cron selects one durable run per UTC date', async (t) => {
       },
     },
   };
-  const scheduledTime = Date.parse('2026-11-17T19:10:00Z');
-  await dispatchScheduled({ cron: INDEX_CRON, scheduledTime }, config);
-  assert.deepEqual(calls, [{ name: 'wykop-index:2026-11-17', scheduledTime }]);
+  const scheduledTime = Date.parse('2026-11-20T19:10:00Z');
+  // Use the external Cron Trigger expression, independent of the routing constant.
+  await dispatchScheduled({ cron: '10 19 * * MON-FRI', scheduledTime }, config);
+  assert.deepEqual(calls, [{ name: 'wykop-index:2026-11-20', scheduledTime }]);
   await assert.rejects(dispatchScheduled({ cron: INDEX_CRON, scheduledTime: NaN }, config), /Invalid scheduled time/);
   assert.equal(calls.length, 1);
 });
