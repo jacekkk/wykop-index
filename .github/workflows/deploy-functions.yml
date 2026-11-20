@@ -29,7 +29,7 @@ jobs:
           node-version: '22'
       - name: Test functions before deployment
         run: node --test functions/test/*.test.mjs
-      - name: Package the configured OpenRouter model for sentiment analysis
+      - name: Package the configured OpenRouter fallback model
         env:
           OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
         run: |
@@ -38,7 +38,7 @@ jobs:
           import { resolveOpenRouterModel } from './functions/wykop-index/src/ai-provider.js';
           const model = resolveOpenRouterModel();
           await writeFile('functions/wykop-index/src/deployment-model.js', `export default ${JSON.stringify(model)};\n`);
-          console.log(`Deploying wykop-index sentiment analysis with OPENROUTER_MODEL=${model}; mentions and Tomek videos use Gemini`);
+          console.log(`Deploying Gemini-first sentiment analysis with OpenRouter fallback model ${model}; mentions and Tomek videos use Gemini`);
           NODE
       - name: Install Appwrite CLI
         run: npm install --global appwrite-cli@28.13.3
