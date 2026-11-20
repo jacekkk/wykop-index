@@ -24,25 +24,16 @@ export async function generateJson({
   fetchImpl = fetch,
   log = () => {},
 }) {
-  log('Using Gemini for sentiment analysis.');
-  let geminiError;
-  try {
-    // The caller runs and validates the complete Gemini retry sequence.
-    return await generateGemini();
-  } catch (err) {
-    geminiError = err;
-  }
-
   const key = env.OPENROUTER_API_KEY?.trim();
   if (!key) {
-    log('Gemini failed and no OpenRouter fallback key is configured.');
-    throw geminiError;
+    log('No OpenRouter key is configured; using Gemini for sentiment analysis.');
+    return generateGemini();
   }
 
   const model = resolveOpenRouterModel(env);
 
   try {
-    log(`Gemini failed; using OpenRouter fallback model ${model}.`);
+    log(`Using OpenRouter sentiment model ${model}.`);
     const response = await fetchImpl(OPENROUTER_URL, {
       method: 'POST',
       redirect: 'manual',
@@ -83,9 +74,14 @@ export async function generateJson({
     return parseResponse(choice.message.content);
   } catch (err) {
     // Do not log upstream bodies, prompts, credentials, or arbitrary exception
-    // messages. Do not loop back to Gemini or repeat either provider here.
+    // messages. The caller runs and validates the complete Gemini retry sequence;
+    // neither provider is restarted if that fallback also fails.
     const reason = err instanceof ProviderError ? err.message : 'request or output validation failed';
-    log(`OpenRouter fallback failed (${reason}).`);
-    throw new AggregateError([geminiError, err], `Gemini and OpenRouter sentiment generation failed (${reason}).`);
+    log(`OpenRouter sentiment failed (${reason}); using Gemini fallback.`);
+    try {
+      return await generateGemini();
+    } catch (geminiError) {
+      throw new AggregateError([err, geminiError], `OpenRouter and Gemini sentiment generation failed (${reason}).`);
+    }
   }
 }

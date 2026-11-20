@@ -33,7 +33,7 @@ Zmiany w funkcjach, `appwrite.config.json` lub workflow wdrożenia trafiające d
 `main` (w tym przez merge PR) automatycznie wdrażają obie funkcje po testach.
 Workflow **Deploy Appwrite functions** można też uruchomić ręcznie.
 
-Konfiguracja dostawców AI (Gemini dla sentymentu z zapasowym OpenRouter,
+Konfiguracja dostawców AI (OpenRouter dla sentymentu z zapasowym Gemini,
 Gemini dla odpowiedzi i filmów), obsługa
 wyszukiwania i multimediów oraz testy: [functions/AI_PROVIDERS.md](functions/AI_PROVIDERS.md).
 

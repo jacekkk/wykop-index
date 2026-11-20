@@ -1,8 +1,8 @@
 # AI providers for the Appwrite functions
 
-`wykop-index` uses Gemini first for sentiment analysis. After its Gemini retries
-are exhausted, it tries OpenRouter once if an OpenRouter key is configured.
-The default OpenRouter fallback model is `baidu/ernie-5.5-flash-preview:free`.
+`wykop-index` uses OpenRouter first for sentiment analysis. If that request fails
+or returns invalid output, it falls back to Gemini and its bounded retries.
+The default OpenRouter sentiment model is `baidu/ernie-5.5-flash-preview:free`.
 All `wykop-post` mention replies
 use Gemini, including text-only threads. Tomek YouTube analysis also stays on
 Gemini and is optional: a video-analysis failure does not block the daily index.
@@ -19,19 +19,18 @@ paste them into a pull request.
 
 | Variable | Function | Value / behavior |
 | --- | --- | --- |
-| `OPENROUTER_API_KEY` | `wykop-index` | Optional OpenRouter key. Enables fallback after all Gemini sentiment attempts fail. Without it, the final Gemini error is propagated. |
+| `OPENROUTER_API_KEY` | `wykop-index` | Enables primary OpenRouter sentiment analysis. Without a nonblank key, sentiment uses Gemini directly. |
 | `OPENROUTER_MODEL` | `wykop-index` | Optional Appwrite/local selector when deploying outside GitHub. The GitHub deployment workflow packages its repository-variable selection instead, taking precedence over this environment value. Only `:free` models are accepted. |
-| `GEMINI_API_KEY` | Both | Used for primary index sentiment analysis, mention replies, and Tomek video analysis. |
+| `GEMINI_API_KEY` | Both | Used for fallback index sentiment analysis, mention replies, and Tomek video analysis. |
 | `GEMINI_BACKUP_API_KEY` | `wykop-post` | Optional second Gemini key. When absent, the primary key is reused. |
 | `GEMINI_MODEL` | Both | Optional; defaults to `gemini-3.8-flash`. |
 | `GEMINI_FALLBACK_MODEL` | Both | Optional; defaults to `gemini-3.6-flash`. |
 
-The provider order is fixed: Gemini first, then the optional OpenRouter fallback.
-The legacy `AI_PROVIDER` variable is ignored and can be removed; an old
-`AI_PROVIDER=openrouter` setting cannot make OpenRouter primary. An invalid
-OpenRouter model only affects fallback when it is needed, so a healthy Gemini
-response does not depend on runtime fallback configuration. The GitHub deployment
-workflow still validates the model before packaging it.
+The provider order is fixed: OpenRouter first when its key is configured, then
+Gemini. The legacy `AI_PROVIDER` variable is ignored and can be removed; an old
+`AI_PROVIDER=gemini` setting cannot reverse that order. An invalid OpenRouter model
+is a configuration error and fails before either provider receives a prompt.
+The GitHub deployment workflow also validates the model before packaging it.
 
 `wykop-post` always uses Gemini and ignores `OPENROUTER_*` variables. Keep the
 existing Appwrite and Wykop credentials.
@@ -100,8 +99,8 @@ Reference: [Appwrite non-interactive CLI deployments](https://appwrite.io/docs/t
 
 ## Search, attachments, and response handling
 
-- `wykop-index` tries Gemini for sentiment JSON, then OpenRouter if all Gemini
-  attempts fail. Its optional Tomek YouTube analysis remains on Gemini and can
+- `wykop-index` tries OpenRouter for sentiment JSON, then Gemini if the OpenRouter
+  request or output validation fails. Its optional Tomek analysis uses Gemini and can
   still be skipped on failure.
 - `wykop-post` keeps its existing Tavily/Brave searches, retrieved sources, and
   Yahoo current-quote lookup. All mention batches send that context to Gemini;
@@ -114,14 +113,16 @@ Reference: [Appwrite non-interactive CLI deployments](https://appwrite.io/docs/t
   mention replies keep their existing flat JSON-array contract. Local response
   validation finishes before posting, and all replies pass through the
   current-price guard.
-- At most one OpenRouter request is attempted after the Gemini sentiment retries
-  fail, with a 45-second timeout and an 8,192-token output limit. HTTP failures
-  (including quota/auth errors), refused or truncated completions, and invalid
-  task JSON fail that execution; they do not restart Gemini or OpenRouter.
+- At most one OpenRouter sentiment request is attempted, with a 45-second timeout
+  and an 8,192-token output limit. HTTP failures (including quota/auth errors),
+  refused or truncated completions, and invalid task JSON invoke the Gemini
+  fallback. If Gemini also exhausts its retries, the execution fails with both
+  provider errors preserved; it does not restart OpenRouter or Gemini.
   No paid OpenRouter models or search plugins are enabled: requests also set
   zero provider price caps for input, output, and per-request charges.
-- Gemini retains three attempts for index generation and four for mention
-  replies, with five-second delays. Its per-request timeouts are 60 seconds for
+- Gemini retains three attempts for sentiment fallback and, independently, three
+  for Tomek video analysis, plus four for mention replies, with five-second delays.
+  Its per-request timeouts are 60 seconds for
   index and 45 seconds for replies. This bounds inference time before the
   Appwrite execution timeout; other network and processing work also consumes
   that execution budget.
@@ -130,9 +131,9 @@ Reference: [Appwrite non-interactive CLI deployments](https://appwrite.io/docs/t
   ten whole-run retries, and existing posting semantics are unchanged.
 
 Free OpenRouter endpoints have account-level daily and per-minute request
-limits and can still run out of capacity. Only fallback index sentiment
-generation uses that allowance; successful Gemini analysis and mention replies
-do not call OpenRouter. Fallback requests in later executions count again.
+limits and can still run out of capacity. Index sentiment generation uses that
+allowance when a key is configured; Tomek analysis and mention replies do not
+call OpenRouter. Requests in later executions count again.
 Idle `wykop-post` polls make no Gemini request.
 Tavily/Brave have their own quotas.
 
@@ -156,6 +157,8 @@ services. They cover index provider routing and failures, packaged-model
 selection, response contracts, and preservation of the current-price guard.
 Mention-entrypoint tests verify Gemini routing with old OpenRouter configuration,
 attachments elsewhere in a thread, and Gemini's model/key retry sequence.
+Index-entrypoint tests verify OpenRouter sentiment alongside Gemini-only Tomek
+analysis, including video retries and continuing when video analysis fails.
 Deployment regression tests cover zero-exit CLI failures, unchanged activation,
 non-ready builds, permission failures, and successful activation. The tests do
 not measure Polish model quality or live provider availability.
