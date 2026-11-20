@@ -39,7 +39,7 @@ jobs:
         run: |
           node --check functions/wykop-index/src/main.js
           node --check functions/wykop-post/src/main.js
-      - name: Package the configured OpenRouter fallback model
+      - name: Package the configured OpenRouter sentiment model
         env:
           OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
         run: |
@@ -48,7 +48,7 @@ jobs:
           import { resolveOpenRouterModel } from './functions/wykop-index/src/ai-provider.js';
           const model = resolveOpenRouterModel();
           await writeFile('functions/wykop-index/src/deployment-model.js', `export default ${JSON.stringify(model)};\n`);
-          console.log(`Deploying Gemini-first sentiment analysis with OpenRouter fallback model ${model}; mentions and Tomek videos use Gemini`);
+          console.log(`Deploying OpenRouter-first sentiment model ${model} with Gemini fallback; mentions and Tomek videos use Gemini`);
           NODE
       - name: Install Appwrite CLI
         run: npm install --global appwrite-cli@28.13.3
