@@ -44,8 +44,10 @@ posting handlers.
 
 ## Deploy from GitHub
 
-After this PR is reviewed and merged, use the manual **Deploy Appwrite functions**
-workflow to deploy both functions from the default branch.
+After review and merge, **Deploy Appwrite functions** automatically deploys both
+functions when a push to `main` changes `functions/**`, `appwrite.config.json`,
+or the deployment workflow. This includes PR merges and direct pushes. Changes
+limited to the frontend or unrelated root documentation do not deploy functions.
 
 1. In **Settings > Secrets and variables > Actions > Variables**, create the
    repository variable **`OPENROUTER_MODEL`**, for example
@@ -60,11 +62,15 @@ workflow to deploy both functions from the default branch.
 3. Retain the existing repository variables `APPWRITE_ENDPOINT`,
    `APPWRITE_PROJECT_ID`, `APPWRITE_WYKOP_INDEX_FUNCTION_ID`, and
    `APPWRITE_WYKOP_POST_FUNCTION_ID`, pointing to the deployed functions.
-4. Run **Actions > Deploy Appwrite functions > Run workflow** on the default branch.
+4. Merge function changes into `main` to deploy automatically, or use
+   **Actions > Deploy Appwrite functions > Run workflow** on the default branch
+   for a manual deployment, including after a model-variable change.
 
-The workflow tests the functions, validates `OPENROUTER_MODEL`, and packages that
+The workflow runs the function tests and entrypoint syntax checks, validates
+`OPENROUTER_MODEL`, and packages that
 selection into `wykop-index` before uploading and activating both functions with the
-pinned Appwrite CLI. Existing Appwrite variables, including API keys, are
+pinned Appwrite CLI. Automatic and manual deployments share a concurrency group
+so only one runs at a time. Existing Appwrite variables, including API keys, are
 preserved: the CLI is not run with `--with-variables`. The workflow does not
 invoke either function. Their deployed settings come from `appwrite.config.json`;
 the existing Cloudflare scheduling configuration is unchanged.

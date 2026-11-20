@@ -29,6 +29,10 @@ appwrite push functions # update functions
 appwrite push sites # update frontend
 ```
 
+Zmiany w funkcjach, `appwrite.config.json` lub workflow wdrożenia trafiające do
+`main` (w tym przez merge PR) automatycznie wdrażają obie funkcje po testach.
+Workflow **Deploy Appwrite functions** można też uruchomić ręcznie.
+
 Konfiguracja dostawców AI (Gemini dla sentymentu z zapasowym OpenRouter,
 Gemini dla odpowiedzi i filmów), obsługa
 wyszukiwania i multimediów oraz testy: [functions/AI_PROVIDERS.md](functions/AI_PROVIDERS.md).

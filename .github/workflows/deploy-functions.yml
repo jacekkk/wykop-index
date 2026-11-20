@@ -1,6 +1,12 @@
 name: Deploy Appwrite functions
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - functions/**
+      - appwrite.config.json
+      - .github/workflows/deploy-functions.yml
   workflow_dispatch:
 
 permissions:
@@ -29,6 +35,10 @@ jobs:
           node-version: '22'
       - name: Test functions before deployment
         run: node --test functions/test/*.test.mjs
+      - name: Check function entrypoints
+        run: |
+          node --check functions/wykop-index/src/main.js
+          node --check functions/wykop-post/src/main.js
       - name: Package the configured OpenRouter fallback model
         env:
           OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
