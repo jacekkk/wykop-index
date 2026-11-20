@@ -45,7 +45,8 @@ export default async ({ req, res, log: baseLog, error }) => {
 
     CRITICAL: You MUST respond with ONLY raw JSON. DO NOT wrap your response in markdown code blocks. DO NOT add any text before or after the JSON. Your entire response must be valid JSON that can be directly parsed.`;
 
-    // Bounded Gemini attempts before OpenRouter fallback; Cloudflare manages whole-run retries.
+    // Bounded Gemini attempts for sentiment fallback and Tomek video analysis.
+    // Cloudflare manages whole-run retries.
     const maxAttempts = 3;
 
     const retryWithBackoff = async (fn, delayMs = 5000) => {
