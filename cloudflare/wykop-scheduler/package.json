@@ -8,9 +8,15 @@
   },
   "scripts": {
     "test": "node --test",
-    "dev": "wrangler dev --test-scheduled",
-    "check": "wrangler deploy --dry-run",
-    "deploy": "wrangler deploy"
+    "dev": "npm run dev:index",
+    "dev:index": "wrangler dev --config wrangler.jsonc --test-scheduled",
+    "dev:post": "wrangler dev --config wrangler.post.jsonc --test-scheduled --port 8788",
+    "check": "npm run check:index && npm run check:post",
+    "check:index": "wrangler deploy --config wrangler.jsonc --dry-run",
+    "check:post": "wrangler deploy --config wrangler.post.jsonc --dry-run",
+    "deploy": "npm run deploy:index",
+    "deploy:index": "wrangler deploy --config wrangler.jsonc",
+    "deploy:post": "wrangler deploy --config wrangler.post.jsonc"
   },
   "devDependencies": {
     "miniflare": "5.20261117.0-beta",

@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wykop-post-scheduler",
+  "main": "src/post.js",
+  "compatibility_date": "2026-11-17",
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true
+  },
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+  "vars": {
+    "SCHEDULER_ENABLED": "false",
+    "APPWRITE_ENDPOINT": "https://fra.cloud.appwrite.io/v1",
+    "APPWRITE_PROJECT_ID": "wykopindex",
+    "APPWRITE_WYKOP_POST_FUNCTION_ID": "wykop-post"
+  }
+}
