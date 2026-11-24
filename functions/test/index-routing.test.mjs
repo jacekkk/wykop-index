@@ -13,7 +13,13 @@ const stateKey = Symbol.for('wykop.index-routing-test');
 
 // Exercise the real entrypoint. All inference, Wykop writes, storage, and SDK
 // calls stay inside isolated stubs and an allowlisted fetch mock.
-async function runIndex(t, { routerStatus = 200, sentimentFailures = [], videoFailures = [] } = {}) {
+async function runIndex(t, {
+  routerStatus = 200,
+  sentimentFailures = [],
+  videoFailures = [],
+  subscribers = [],
+  commentResponse = number => Response.json({ data: { id: 1000 + number } }, { status: 201 }),
+} = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'wykop-index-routing-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   for (const file of ['main.js', 'ai-provider.js', 'ai-response.js', 'deployment-model.js', 'utils.js']) {
@@ -28,7 +34,10 @@ async function runIndex(t, { routerStatus = 200, sentimentFailures = [], videoFa
         setKey() { return this; }
       }
       export class TablesDB {
-        async listRows() { return { rows: [] }; }
+        async listRows({ tableId }) {
+          const { subscriberRows } = globalThis[Symbol.for('wykop.index-routing-test')];
+          return { rows: tableId === 'subscribers' ? subscriberRows : [] };
+        }
         async createRow(row) {
           globalThis[Symbol.for('wykop.index-routing-test')].saved.push(row.data);
           return { $id: 'test-row' };
@@ -83,7 +92,7 @@ async function runIndex(t, { routerStatus = 200, sentimentFailures = [], videoFa
     }
   });
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-20T20:00:00Z') });
-  const requests = [], sentimentGenerations = [], videoGenerations = [], saved = [], errors = [], delays = [];
+  const requests = [], sentimentGenerations = [], videoGenerations = [], saved = [], errors = [], delays = [], comments = [];
   t.mock.method(globalThis, 'setTimeout', (callback, delay) => {
     delays.push(delay);
     queueMicrotask(callback);
@@ -91,6 +100,7 @@ async function runIndex(t, { routerStatus = 200, sentimentFailures = [], videoFa
   });
   globalThis[stateKey] = {
     saved,
+    subscriberRows: subscribers.map(username => ({ $id: username })),
     generate(apiKey, request) {
       const isVideo = Array.isArray(request.contents);
       const generations = isVideo ? videoGenerations : sentimentGenerations;
@@ -115,7 +125,10 @@ async function runIndex(t, { routerStatus = 200, sentimentFailures = [], videoFa
     if (url.startsWith('https://wykop.pl/api/v3/tags/gielda/stream?')) return Response.json({ data: [] });
     if (url === 'https://wykop.pl/api/v3/media/photos?type=comments') return Response.json({ data: { key: 'test-photo' } });
     if (url === 'https://wykop.pl/api/v3/entries') return Response.json({ data: { id: 999 } });
-    if (url === 'https://wykop.pl/api/v3/entries/999/comments') return Response.json({ data: { id: 1000 } });
+    if (url === 'https://wykop.pl/api/v3/entries/999/comments' && options.method === 'POST') {
+      comments.push(JSON.parse(options.body).data);
+      return commentResponse(comments.length);
+    }
     assert.fail(`Unexpected request: ${options.method || 'GET'} ${url}`);
   });
   const { default: main } = await import(pathToFileURL(join(dir, 'main.js')).href);
@@ -130,7 +143,7 @@ async function runIndex(t, { routerStatus = 200, sentimentFailures = [], videoFa
   assert.equal(JSON.parse(routerRequests[0].body).model, 'test/sentiment:free');
   const posts = requests.filter(({ url, method }) => url === 'https://wykop.pl/api/v3/entries' && method === 'POST');
   assert.equal(posts.length, 1, 'provider routing must not duplicate the index post');
-  return { sentimentGenerations, videoGenerations, saved: saved[0], errors, delays, post: JSON.parse(posts[0].body).data };
+  return { sentimentGenerations, videoGenerations, saved: saved[0], errors, delays, comments, post: JSON.parse(posts[0].body).data };
 }
 
 test('index uses OpenRouter sentiment and sends Tomek video directly to Gemini', async t => {
@@ -146,6 +159,7 @@ test('index uses OpenRouter sentiment and sends Tomek video directly to Gemini',
   assert.deepEqual(video.contents[0], { fileData: { fileUri: videoUrl } });
   assert.equal(JSON.parse(result.saved.tomekAnalysis).analysis, videoAnalysis);
   assert.match(result.post.content, /Analiza filmu Tomka/);
+  assert.equal(result.comments.length, 1, 'with no subscribers, only the signup comment is posted');
 });
 
 test('sentiment fallback retains Gemini retries and Tomek restarts with its primary model', async t => {
@@ -175,4 +189,34 @@ test('exhausted Gemini video analysis still publishes and saves the OpenRouter i
   assert.equal(result.errors.length, 1);
   assert.match(result.errors[0], /Failed to fetch\/analyze Tomek video/);
   assert.doesNotMatch(result.post.content, /Tomkowe Kreski/);
+});
+
+test('335 subscribers are mentioned once each across seven comments after the signup comment', async t => {
+  const subscribers = Array.from({ length: 335 }, (_, i) => `test-subscriber-${i + 1}`);
+  const { comments, errors, saved } = await runIndex(t, { subscribers });
+  assert.deepEqual(errors, []);
+  assert.equal(saved.entryId, '999');
+
+  const [signup, ...batches] = comments;
+  assert.match(signup.content, /^Zaplusuj ten komentarz jeżeli chcesz być wołany do przyszłych wpisów/);
+  const recipients = batches.map(({ content }) => {
+    assert.match(content, /^Wołam: @/);
+    return [...content.matchAll(/@([\w-]+)/g)].map(([, username]) => username);
+  });
+  assert.deepEqual(recipients.map(batch => batch.length), [50, 50, 50, 50, 50, 50, 35]);
+  assert.deepEqual(recipients.flat(), subscribers);
+});
+
+test('a rejected subscriber batch stops later comments while saving the published entry', async t => {
+  const subscribers = Array.from({ length: 151 }, (_, i) => `test-subscriber-${i + 1}`);
+  const { comments, errors, saved } = await runIndex(t, {
+    subscribers,
+    commentResponse: number => number === 3
+      ? Response.json({ error: { message: 'limit_exceeded' } }, { status: 400 })
+      : Response.json({ data: { id: 1000 + number } }, { status: 201 }),
+  });
+  assert.equal(comments.length, 3, 'only the signup, first batch, and rejected second batch were attempted');
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /entry 999 at batch 2\/4: HTTP 400/);
+  assert.equal(saved.entryId, '999');
 });
