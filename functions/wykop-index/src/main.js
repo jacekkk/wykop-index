@@ -16,8 +16,6 @@ const DATABASE_ID = '69617178003ac8ef4fba';
 const BUCKET_ID = '6961715000182498a35a';
 const SENTIMENT_COLLECTION = 'sentiment';
 const SUBSCRIBERS_COLLECTION = 'subscribers';
-// Wykop's mention limit for the bot's orange account: https://wykop.pl/faq/konto#limity-na-koncie
-const MENTIONS_PER_COMMENT = 50;
 
 export default async ({ req, res, log: baseLog, error }) => {
   try {
@@ -693,23 +691,24 @@ Jeżeli chciałbyś wesprzeć autora, możesz to zrobić tutaj: [buycoffee.to/ja
         queries: [sdk.Query.limit(1000)]
       });
 
-      const subscribers = subscribersResult.rows;
-      log(`Fetched ${subscribers.length} subscribers`);
+      const subscriberMentions = subscribersResult.rows.map(doc => `@${doc.$id}`).join(', ');
+      log(`Fetched ${subscribersResult.rows.length} subscribers`);
 
-      const postComment = (content) => fetch(`https://wykop.pl/api/v3/entries/${entryId}/comments`, {
+      // Post subscription comment under the entry
+      const commentResponse = await fetch(`https://wykop.pl/api/v3/entries/${entryId}/comments`, {
         method: 'POST',
         headers: {
           'accept': 'application/json',
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${wykopToken}`
         },
-        body: JSON.stringify({ data: { content, adult: false } })
+        body: JSON.stringify({
+          data: {
+            content: `Zaplusuj ten komentarz jeżeli chcesz być wołany do przyszłych wpisów. Jeżeli nie chcesz już być wołany, dodaj komentarz o treści: "@KrachSmieciuchIndex: nie wołaj".`,
+            adult: false
+          }
+        })
       });
-
-      // wykop-post finds the signup comment by this text prefix.
-      const commentResponse = await postComment(
-        'Zaplusuj ten komentarz jeżeli chcesz być wołany do przyszłych wpisów. Jeżeli nie chcesz już być wołany, dodaj komentarz o treści: "@KrachSmieciuchIndex: nie wołaj".'
-      );
 
       if (!commentResponse.ok) {
         const errorText = await commentResponse.text();
@@ -719,26 +718,29 @@ Jeżeli chciałbyś wesprzeć autora, możesz to zrobić tutaj: [buycoffee.to/ja
         log(`Successfully posted subscription comment, comment ID: ${commentResult.data.id}`);
       }
 
-      const batchCount = Math.ceil(subscribers.length / MENTIONS_PER_COMMENT);
-      for (let batch = 0; batch < batchCount; batch++) {
-        const start = batch * MENTIONS_PER_COMMENT;
-        const mentions = subscribers.slice(start, start + MENTIONS_PER_COMMENT).map(row => `@${row.$id}`);
-        const batchLabel = `${batch + 1}/${batchCount}`;
-        try {
-          const mentionsResponse = await postComment(`Wołam: ${mentions.join(', ')}`);
-          if (!mentionsResponse.ok) {
-            await mentionsResponse.body?.cancel();
-            throw new Error(`HTTP ${mentionsResponse.status}`);
-          }
+      // Post subscriber mentions as a separate comment
+      if (subscriberMentions) {
+        const mentionsResponse = await fetch(`https://wykop.pl/api/v3/entries/${entryId}/comments`, {
+          method: 'POST',
+          headers: {
+            'accept': 'application/json',
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${wykopToken}`
+          },
+          body: JSON.stringify({
+            data: {
+              content: `Wołam: ${subscriberMentions}`,
+              adult: false
+            }
+          })
+        });
+
+        if (!mentionsResponse.ok) {
+          const errorText = await mentionsResponse.text();
+          error(`Failed to post mentions comment: ${mentionsResponse.status} ${errorText}`);
+        } else {
           const mentionsResult = await mentionsResponse.json();
-          const commentId = mentionsResult?.data?.id;
-          if (!commentId) throw new Error('Wykop returned no comment ID');
-          log(`Posted subscriber mention batch ${batchLabel} (${mentions.length} people), comment ID: ${commentId}`);
-        } catch (err) {
-          // Stop after a rejection or uncertain submission. The entry is already
-          // published, so proceed to save its ID without replaying any comment.
-          error(`Stopped subscriber mentions for entry ${entryId} at batch ${batchLabel}: ${err.message}`);
-          break;
+          log(`Successfully posted mentions comment, comment ID: ${mentionsResult.data.id}`);
         }
       }
     } catch (postError) {
