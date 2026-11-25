@@ -1,6 +1,6 @@
 import deploymentModel from './deployment-model.js';
 
-export const DEFAULT_OPENROUTER_MODEL = 'baidu/ernie-5.5-flash-preview:free';
+export const DEFAULT_OPENROUTER_MODEL = 'nvidia/nemotron-3.5-super-vl:free';
 export const OPENROUTER_TIMEOUT_MS = 45_000;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 

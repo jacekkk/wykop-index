@@ -2,14 +2,14 @@
 
 `wykop-index` uses OpenRouter first for sentiment analysis. If that request fails
 or returns invalid output, it falls back to Gemini and its bounded retries.
-The default OpenRouter sentiment model is `baidu/ernie-5.5-flash-preview:free`.
+The default OpenRouter sentiment model is `nvidia/nemotron-3.5-super-vl:free`.
 All `wykop-post` mention replies
 use Gemini, including text-only threads. Tomek YouTube analysis also stays on
 Gemini and is optional: a video-analysis failure does not block the daily index.
 
-The OpenRouter model is configurable. ERNIE is the default preview model;
-equivalent quality on Polish financial slang has not been established by the
-automated tests.
+The OpenRouter model is configurable. The automated tests verify the response
+format and fallback behavior. Compare outputs on the same saved Wykop batch to
+evaluate style and Polish financial slang.
 
 ## Configure and deploy after review
 
@@ -48,9 +48,9 @@ functions when a push to `main` changes `functions/**`, `appwrite.config.json`,
 or the deployment workflow. This includes PR merges and direct pushes. Changes
 limited to the frontend or unrelated root documentation do not deploy functions.
 
-1. In **Settings > Secrets and variables > Actions > Variables**, create the
-   repository variable **`OPENROUTER_MODEL`**, for example
-   `baidu/ernie-5.5-flash-preview:free`.
+1. To select a different free model, set **`OPENROUTER_MODEL`** under
+   **Settings > Secrets and variables > Actions > Variables**. Leave the variable
+   unset or empty to use `nvidia/nemotron-3.5-super-vl:free`.
 2. Reuse the existing GitHub repository secret **`APPWRITE_API_KEY`**. The Appwrite
    project key it contains must have `functions.read`, `functions.write`, and
    `rules.read` for CLI deployment. If the CLI must create or update a function's
@@ -89,7 +89,7 @@ successful Wykop posting.
 
 Editing the GitHub variable alone does **not** update running sentiment analysis: rerun
 the deployment workflow after each change. An empty/unset variable packages the
-default `baidu/ernie-5.5-flash-preview:free`. This selection takes precedence over
+default `nvidia/nemotron-3.5-super-vl:free`. This selection takes precedence over
 any older Appwrite `OPENROUTER_MODEL` value. Outside this workflow, the committed
 `deployment-model.js` placeholder allows the Appwrite environment value to be
 used instead. The functions deploy sequentially; if the second fails, the first
@@ -138,7 +138,7 @@ Idle `wykop-post` polls make no Gemini request.
 Tavily/Brave have their own quotas.
 
 References: [OpenRouter free limits](https://openrouter.ai/collections/free-models),
-[ERNIE model](https://openrouter.ai/baidu/ernie-5.5-flash-preview:free),
+[Nemotron 3.5 Super VL](https://openrouter.ai/nvidia/nemotron-3.5-super-vl:free),
 [structured outputs](https://openrouter.ai/docs/guides/features/structured-outputs),
 [provider price caps](https://openrouter.ai/docs/guides/routing/provider-selection#max-price).
 
